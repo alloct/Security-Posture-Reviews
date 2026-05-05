@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.git
+.gitignore
+.venv
+venv/
+env/
+.env
+.idea
+.vscode
+*.log
+data/*.db
+app/static/uploads/*
+!app/static/uploads/.gitkeep

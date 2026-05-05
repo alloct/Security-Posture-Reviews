@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    image: msp-security-report:latest
+    container_name: msp-security-report
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./app/static/uploads:/app/app/static/uploads
+    environment:
+      - DATABASE_URL=sqlite:////app/data/app.db
+      - UPLOAD_DIR=/app/app/static/uploads
+      - REPORT_DIR=/app/app/static/uploads/reports

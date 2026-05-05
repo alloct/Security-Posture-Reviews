@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Annual Security Posture Assessment - {{ client.name }} {{ assessment.year }}</title>
+  {% if google_fonts_url %}
+    <style>@import url('{{ google_fonts_url }}');</style>
+  {% endif %}
+  <style>
+    /* ---------- Page setup ---------- */
+    @page {
+      size: A4;
+      margin: 22mm 18mm 22mm 18mm;
+      @bottom-left {
+        content: "{{ settings.company_name|e }} | Confidential";
+        font-family: {{ font_stack|safe }};
+        font-size: 8pt;
+        color: #6b7280;
+      }
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: {{ font_stack|safe }};
+        font-size: 8pt;
+        color: #6b7280;
+      }
+    }
+    /* Cover page: full-bleed (no margin), no footer running content */
+    @page :first {
+      margin: 0;
+      @bottom-left { content: ""; }
+      @bottom-right { content: ""; }
+    }
+
+    /* ---------- Base ---------- */
+    html, body {
+      font-family: {{ font_stack|safe }};
+      color: #111827;
+      font-size: 10.5pt;
+      line-height: 1.45;
+      margin: 0;
+      padding: 0;
+    }
+    h1, h2, h3, h4 { color: {{ palette.primary_dark }}; margin: 0 0 6pt 0; }
+    h1 { font-size: 22pt; font-weight: 700; letter-spacing: -0.3pt; }
+    h2 { font-size: 14pt; font-weight: 700; padding-bottom: 3pt; border-bottom: 1pt solid {{ palette.panel_border }}; margin-top: 14pt; }
+    h3 { font-size: 11.5pt; font-weight: 700; margin-top: 10pt; }
+    h4 { font-size: 10pt; font-weight: 700; }
+    p { margin: 0 0 6pt 0; }
+    em { font-style: italic; color: #6b7280; }
+    strong { font-weight: 700; }
+    .muted { color: {{ palette.muted }}; }
+    .small { font-size: 9pt; }
+
+    /* ---------- Cover Page ----------
+       Important: do NOT set fixed heights anywhere. WeasyPrint will paginate
+       the cover into a single A4 page on its own. Forcing 297mm of layout has
+       a tendency to overflow by sub-pixel amounts and emit a phantom page 2.
+    */
+    .cover {
+      page-break-after: always;
+      margin: 0;
+      padding: 0;
+    }
+    .cover-band {
+      background: {{ palette.primary }};
+      color: #ffffff;
+      padding: 22mm 18mm 16mm 18mm;
+    }
+    .cover-band-table { width: 100%; border-collapse: collapse; }
+    .cover-band-table td { vertical-align: middle; padding: 0; }
+    .cover-band-table td.logo-cell { width: 60%; }
+    .cover-band-table td.logo-cell img { max-height: 22mm; max-width: 80mm; }
+    .cover-band-table td.label-cell { width: 40%; text-align: right; }
+    .cover-band .label {
+      font-size: 9pt;
+      letter-spacing: 1.5pt;
+      text-transform: uppercase;
+      opacity: 0.9;
+    }
+    .cover-body {
+      padding: 14mm 18mm 6mm 18mm;
+    }
+    .cover-eyebrow {
+      font-size: 11pt;
+      color: {{ palette.primary }};
+      font-weight: 600;
+      letter-spacing: 0.5pt;
+      text-transform: uppercase;
+    }
+    .cover-title {
+      color: {{ palette.primary_dark }};
+      font-size: 30pt;
+      font-weight: 700;
+      line-height: 1.15;
+      margin: 4mm 0 2mm 0;
+    }
+    .cover-year {
+      color: {{ palette.muted }};
+      font-size: 14pt;
+      font-weight: 500;
+      margin-bottom: 14mm;
+    }
+    .cover-meta-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-bottom: 6mm;
+    }
+    .cover-meta-table td { padding: 3pt 6pt 3pt 0; vertical-align: top; font-size: 10pt; }
+    .cover-meta-table td.k {
+      color: {{ palette.muted }};
+      width: 38mm;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      font-size: 8.5pt;
+    }
+    .cover-meta-table td.v { color: {{ palette.primary_dark }}; font-weight: 600; }
+    .cover-foot {
+      padding: 6mm 18mm 18mm 18mm;
+      color: {{ palette.muted }};
+      font-size: 8.5pt;
+      line-height: 1.5;
+    }
+    .confidentiality {
+      border-top: 1pt solid {{ palette.panel_border }};
+      padding-top: 4mm;
+    }
+
+    /* ---------- Risk pill ---------- */
+    .pill {
+      display: inline-block;
+      padding: 2pt 9pt;
+      border-radius: 16pt;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 10pt;
+      letter-spacing: 0.4pt;
+    }
+    .pill-large { font-size: 13pt; padding: 4pt 14pt; }
+    .pill-critical { background: {{ palette.critical }}; }
+    .pill-high { background: {{ palette.high }}; }
+    .pill-medium { background: {{ palette.medium }}; }
+    .pill-low { background: {{ palette.low }}; }
+    .pill-informational { background: {{ palette.informational }}; }
+
+    /* ---------- Cards / panels ---------- */
+    .panel {
+      background: {{ palette.panel_bg }};
+      border: 1pt solid {{ palette.panel_border }};
+      border-left: 4pt solid {{ palette.primary }};
+      padding: 8pt 10pt;
+      margin: 6pt 0 10pt 0;
+    }
+    .callout-priority {
+      background: #fdecec;
+      border: 1pt solid #f3b9b9;
+      border-left: 4pt solid {{ palette.critical }};
+      padding: 8pt 10pt;
+      margin: 8pt 0;
+    }
+
+    /* ---------- Tables ---------- */
+    table.report {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 6pt 0 10pt 0;
+      font-size: 9.5pt;
+    }
+    table.report th {
+      background: {{ palette.table_header_bg }};
+      color: {{ palette.table_header_fg }};
+      text-align: left;
+      padding: 5pt 7pt;
+      font-weight: 700;
+      font-size: 9pt;
+      letter-spacing: 0.2pt;
+      border: 0.5pt solid {{ palette.table_header_bg }};
+    }
+    table.report td {
+      padding: 5pt 7pt;
+      border: 0.5pt solid {{ palette.panel_border }};
+      vertical-align: top;
+    }
+    table.report tr:nth-child(even) td { background: {{ palette.row_alt_bg }}; }
+    table.report .num { text-align: right; white-space: nowrap; }
+
+    /* Score bar built with nested tables (WeasyPrint-friendly) */
+    table.bar { width: 100%; border-collapse: collapse; }
+    table.bar td { padding: 0; border: 0; }
+    table.bar td.bg { background: #e5e7eb; height: 7pt; }
+    .bar-fill { background: {{ palette.primary }}; height: 7pt; display: block; }
+
+    /* Section header rows */
+    .section-header td {
+      background: {{ palette.primary }} !important;
+      color: #ffffff !important;
+      font-weight: 700;
+      padding: 7pt 9pt !important;
+    }
+    .section-header td.score { text-align: right; }
+    .section-warn { color: {{ palette.critical }}; font-weight: 700; }
+
+    /* Recommendations priority cell */
+    td.priority-Critical { color: {{ palette.critical }}; font-weight: 700; }
+    td.priority-High { color: {{ palette.high }}; font-weight: 700; }
+    td.priority-Medium { color: {{ palette.medium }}; font-weight: 700; }
+
+    /* Executive summary banner: single edge-to-edge table with two cells.
+       Both cells use identical vertical padding so they align perfectly. */
+    .exec-banner {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 6pt 0 14pt 0;
+      box-shadow: none;
+    }
+    .exec-banner td {
+      vertical-align: top;
+      padding: 14pt 16pt;
+    }
+    .exec-banner td.exec-score {
+      width: 36%;
+      background: {{ palette.primary }};
+      color: #ffffff;
+    }
+    .exec-banner td.exec-detail {
+      background: {{ palette.panel_bg }};
+      border-top: 1pt solid {{ palette.panel_border }};
+      border-right: 1pt solid {{ palette.panel_border }};
+      border-bottom: 1pt solid {{ palette.panel_border }};
+    }
+    .exec-score .exec-label {
+      font-size: 8.5pt;
+      letter-spacing: 1.2pt;
+      text-transform: uppercase;
+      opacity: 0.85;
+      margin-bottom: 4pt;
+    }
+    .exec-score .exec-num {
+      font-size: 40pt;
+      font-weight: 700;
+      line-height: 1;
+      margin: 0 0 2pt 0;
+    }
+    .exec-score .exec-num .pct {
+      font-size: 22pt;
+      font-weight: 400;
+      opacity: 0.75;
+      margin-left: 1pt;
+    }
+    .exec-score .exec-rating { margin-top: 8pt; }
+    .exec-score .exec-note {
+      margin-top: 10pt;
+      font-size: 8.5pt;
+      opacity: 0.85;
+      line-height: 1.4;
+      border-top: 1pt solid rgba(255,255,255,0.25);
+      padding-top: 6pt;
+    }
+
+    .exec-detail h4 {
+      margin: 0 0 6pt 0;
+      font-size: 10pt;
+      letter-spacing: 0.5pt;
+      text-transform: uppercase;
+      color: {{ palette.primary_dark }};
+    }
+    .exec-detail ul {
+      margin: 0;
+      padding-left: 14pt;
+    }
+    .exec-detail li {
+      margin-bottom: 4pt;
+      line-height: 1.45;
+    }
+    .exec-detail li:last-child { margin-bottom: 0; }
+
+    /* Page break helpers */
+    .page-break { page-break-before: always; }
+    .avoid-break { page-break-inside: avoid; }
+
+    /* ---------- Severity pills (for Nessus tables) ---------- */
+    .sev { display: inline-block; padding: 1pt 6pt; border-radius: 8pt; color: #ffffff; font-size: 8.5pt; font-weight: 700; }
+    .sev-Critical { background: {{ palette.critical }}; }
+    .sev-High { background: {{ palette.high }}; }
+    .sev-Medium { background: {{ palette.medium }}; }
+    .sev-Low { background: {{ palette.low }}; }
+    .sev-Informational { background: {{ palette.informational }}; }
+  </style>
+</head>
+<body>
+
+  <!-- =============== COVER PAGE =============== -->
+  <div class="cover">
+    <div class="cover-band">
+      <table class="cover-band-table">
+        <tr>
+          <td class="logo-cell">
+            {% if logo_url %}
+              <img src="{{ logo_url }}" alt="{{ settings.company_name }}" />
+            {% else %}
+              <div style="font-size: 16pt; font-weight: 700; letter-spacing: 0.5pt;">{{ settings.company_name }}</div>
+            {% endif %}
+          </td>
+          <td class="label-cell">
+            <div class="label">Annual Security Posture Assessment</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="cover-body">
+      <div class="cover-eyebrow">Annual Security Posture Assessment</div>
+      <div class="cover-title">{{ client.name }}</div>
+      <div class="cover-year">{{ assessment.year }}</div>
+
+      <table class="cover-meta-table">
+        <tr><td class="k">Prepared by</td><td class="v">{{ settings.company_name }}</td></tr>
+        <tr><td class="k">Date generated</td><td class="v">{{ generated_at.strftime('%d %B %Y') }}</td></tr>
+        {% if client.industry %}<tr><td class="k">Industry</td><td class="v">{{ client.industry }}</td></tr>{% endif %}
+        {% if client.primary_contact_name %}<tr><td class="k">Client contact</td><td class="v">{{ client.primary_contact_name }}{% if client.primary_contact_email %} ({{ client.primary_contact_email }}){% endif %}</td></tr>{% endif %}
+        <tr><td class="k">Overall rating</td><td class="v"><span class="pill pill-{{ result.risk_rating.value|lower }}">{{ result.risk_rating.value }}</span> &nbsp; {{ result.percentage_int }}%</td></tr>
+      </table>
+    </div>
+
+    <div class="cover-foot">
+      <div class="confidentiality">
+        <strong>Confidentiality notice.</strong> This report contains confidential information prepared by
+        {{ settings.company_name }} for the named recipient. It is intended solely for the use of the
+        client and may not be disclosed, distributed, or copied without prior written consent.
+        {% if settings.contact_email or settings.contact_phone %}
+          For questions regarding the contents of this report, contact
+          {{ settings.company_name }}{% if settings.contact_email %} at {{ settings.contact_email }}{% endif %}{% if settings.contact_phone %} or {{ settings.contact_phone }}{% endif %}.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- =============== EXECUTIVE SUMMARY =============== -->
+  <h1 style="margin-bottom: 8pt;">Executive Summary</h1>
+  <p class="muted">
+    This report summarises the security posture of {{ client.name }} for {{ assessment.year }}, based on a structured assessment
+    of {{ result.max_score }} possible posture points across eight control domains{% if assessment.nessus_summary %}, supplemented by
+    a vulnerability scan{% endif %}.
+  </p>
+
+  <table class="exec-banner avoid-break">
+    <tr>
+      <td class="exec-score">
+        <div class="exec-label">Overall posture score</div>
+        <div class="exec-num">{{ result.percentage_int }}<span class="pct">%</span></div>
+        <div class="exec-rating"><span class="pill pill-large pill-{{ result.risk_rating.value|lower }}">{{ result.risk_rating.value }} risk</span></div>
+        {% if result.nessus_deduction > 0 %}
+          <div class="exec-note">Includes vulnerability scan adjustment of {{ '%.1f'|format(result.nessus_deduction) }} points.</div>
+        {% endif %}
+      </td>
+      <td class="exec-detail">
+        <h4>Key findings</h4>
+        {% if executive_findings %}
+          <ul>
+            {% for f in executive_findings %}<li>{{ f }}</li>{% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">No findings narrative available.</p>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+  {% if assessment.nessus_summary %}
+    {% set ns = assessment.nessus_summary %}
+    <h3>Vulnerability scan at a glance</h3>
+    <table class="report avoid-break">
+      <thead>
+        <tr>
+          <th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Informational</th><th>Total findings</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num"><strong>{{ ns.severity_counts.Critical or 0 }}</strong></td>
+          <td class="num">{{ ns.severity_counts.High or 0 }}</td>
+          <td class="num">{{ ns.severity_counts.Medium or 0 }}</td>
+          <td class="num">{{ ns.severity_counts.Low or 0 }}</td>
+          <td class="num">{{ ns.severity_counts.Informational or 0 }}</td>
+          <td class="num">{{ ns.row_count }}</td>
+        </tr>
+      </tbody>
+    </table>
+  {% endif %}
+
+  <!-- =============== ASSESSMENT RESULTS BY SECTION =============== -->
+  <div class="page-break"></div>
+  <h1>Assessment Results by Section</h1>
+  <p class="muted">
+    Each section is scored independently. Sections scoring below 60 percent are flagged as priority remediation areas.
+  </p>
+
+  {% for s in result.sections %}
+    {% if s.possible > 0 %}
+    <div class="avoid-break">
+      <table class="report" style="margin-bottom: 0;">
+        <tr class="section-header">
+          <td colspan="3">{{ s.name }}{% if s.percentage < 60 %} <span class="section-warn"> &middot; Needs attention</span>{% endif %}</td>
+          <td class="num score" style="width: 110pt;">{{ '%.0f'|format(s.percentage) }}% &nbsp; ({{ '%.1f'|format(s.earned) }} / {{ s.possible }} pts)</td>
+        </tr>
+      </table>
+      <table class="bar" style="margin-bottom: 6pt;">
+        <tr>
+          <td class="bg">
+            <span class="bar-fill" style="width: {{ s.percentage|round(0,'floor') }}%; background: {% if s.percentage < 60 %}{{ palette.critical }}{% elif s.percentage < 85 %}{{ palette.medium }}{% else %}{{ palette.low }}{% endif %};">&nbsp;</span>
+          </td>
+        </tr>
+      </table>
+
+      <table class="report">
+        <thead>
+          <tr>
+            <th>Control question</th>
+            <th style="width: 22%;">Response</th>
+            <th class="num" style="width: 18%;">Earned / Possible</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in s.questions %}
+            <tr>
+              <td>{{ q.text }}</td>
+              <td>{{ q.answer_label }}</td>
+              <td class="num">{{ '%.1f'|format(q.earned) }} / {{ q.possible }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  <!-- =============== VULNERABILITY SCAN FINDINGS =============== -->
+  {% if assessment.nessus_summary %}
+    {% set ns = assessment.nessus_summary %}
+    <div class="page-break"></div>
+    <h1>Vulnerability Scan Findings</h1>
+    <p class="muted">
+      The following findings were ingested from the Nessus CSV export attached to this assessment. Counts reflect raw findings;
+      an individual host may appear in more than one row.
+    </p>
+
+    <h3>Severity breakdown</h3>
+    <table class="report">
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th class="num">Count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sev in ['Critical', 'High', 'Medium', 'Low', 'Informational'] %}
+          <tr>
+            <td><span class="sev sev-{{ sev }}">{{ sev }}</span></td>
+            <td class="num">{{ ns.severity_counts[sev] or 0 }}</td>
+          </tr>
+        {% endfor %}
+        <tr>
+          <td><strong>Total</strong></td>
+          <td class="num"><strong>{{ ns.row_count }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    {% if ns.priority_findings %}
+      <div class="callout-priority avoid-break">
+        <h3 style="margin-top: 0; color: {{ palette.critical }};">Priority Findings (CVSS 9.0 or higher)</h3>
+        <p class="small">The following findings carry a CVSS score of 9.0 or above and represent the highest residual risk on in-scope hosts. They should be remediated as a priority.</p>
+        <table class="report" style="margin-bottom: 0;">
+          <thead>
+            <tr>
+              <th>Plugin</th>
+              <th>Host</th>
+              <th>CVE</th>
+              <th class="num">CVSS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in ns.priority_findings[:20] %}
+              <tr>
+                <td>{{ f.plugin_name }}</td>
+                <td>{{ f.host }}</td>
+                <td>{{ f.cve or '—' }}</td>
+                <td class="num"><strong>{{ f.cvss }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    {% if ns.top_findings %}
+      <h3>Top findings by CVSS</h3>
+      <table class="report">
+        <thead>
+          <tr>
+            <th>Plugin name</th>
+            <th>Host</th>
+            <th>Severity</th>
+            <th class="num">CVSS</th>
+            <th>Synopsis</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in ns.top_findings %}
+            <tr>
+              <td>{{ f.plugin_name }}</td>
+              <td>{{ f.host }}</td>
+              <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+              <td class="num">{{ f.cvss if f.cvss is not none else '—' }}</td>
+              <td class="muted">{{ f.synopsis or '' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endif %}
+
+  <!-- =============== RECOMMENDATIONS =============== -->
+  {% if recommendations %}
+    <div class="page-break"></div>
+    <h1>Recommendations</h1>
+    <p class="muted">
+      The recommendations below were produced from gaps and partial controls identified during the assessment. They are grouped
+      by priority. Critical priority items represent the most material risk reductions and should be addressed first.
+    </p>
+
+    {% for prio in ['Critical', 'High', 'Medium'] %}
+      {% set group = recommendations | selectattr('priority', 'equalto', prio) | list %}
+      {% if group %}
+        <h3>{{ prio }} priority</h3>
+        <table class="report avoid-break">
+          <thead>
+            <tr>
+              <th style="width: 22%;">Control area</th>
+              <th>Recommendation</th>
+              <th style="width: 28%;">Rationale</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in group %}
+              <tr>
+                <td>
+                  <strong>{{ r.section_name }}</strong>
+                  <div class="muted small">{{ r.question_text }}</div>
+                </td>
+                <td>{{ r.text }}</td>
+                <td class="muted small">{{ r.rationale }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+
+  <!-- =============== METHODOLOGY =============== -->
+  <div class="page-break"></div>
+  <h1>Assessment Methodology</h1>
+  <p>
+    {{ settings.company_name }} conducts an annual security posture assessment to provide a structured, repeatable measurement
+    of a client's information security maturity. The assessment is workshop-led and based on responses provided by the
+    client's IT and security stakeholders, supplemented where possible by technical evidence such as vulnerability scans.
+  </p>
+
+  <h3>Scope</h3>
+  <p>
+    The assessment covers eight control domains: Identity and Access Management; Endpoint Security; Network Security;
+    Data Protection and Backup; Vulnerability and Patch Management; Security Awareness and Training; Incident Response and
+    Business Continuity; and Compliance and Governance. Each domain contains a set of control questions that examine the
+    presence, scope, and operational maturity of expected safeguards.
+  </p>
+
+  <h3>Scoring</h3>
+  <p>
+    Each control question is weighted by criticality. Questions covering high-impact controls such as multi-factor
+    authentication, EDR coverage, and immutable backups carry higher weights. Each response is scored as fully implemented,
+    partially implemented, or not implemented and is multiplied by the question weight to produce earned points. The overall
+    posture score is expressed as a percentage of the maximum achievable points.
+  </p>
+  <p>
+    Where a Nessus vulnerability scan is supplied, the technical evidence is used to adjust the posture score. Each Critical
+    severity finding deducts 1.5 points and each High severity finding deducts 0.5 points, capped at 15 and 10 points
+    respectively. Medium, Low, and Informational findings are reported but do not impact the score.
+  </p>
+
+  <h3>Risk rating</h3>
+  <table class="report">
+    <thead>
+      <tr><th>Score band</th><th>Rating</th><th>Interpretation</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>85% to 100%</td><td><span class="pill pill-low">Low</span></td><td>Mature controls in place across most domains.</td></tr>
+      <tr><td>70% to 84%</td><td><span class="pill pill-medium">Medium</span></td><td>Generally adequate posture with notable gaps to address.</td></tr>
+      <tr><td>50% to 69%</td><td><span class="pill pill-high">High</span></td><td>Significant exposure across multiple control domains.</td></tr>
+      <tr><td>Below 50%</td><td><span class="pill pill-critical">Critical</span></td><td>Material risk requiring an immediate remediation programme.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Limitations</h3>
+  <p>
+    This assessment is a point-in-time review based on information made available by the client. It does not constitute a
+    technical penetration test or a regulatory audit. Findings should be interpreted alongside the client's risk appetite,
+    business context, and any active improvement initiatives.
+  </p>
+
+  {% if settings.report_footer_text %}
+    <p class="small muted" style="margin-top: 14pt;">{{ settings.report_footer_text }}</p>
+  {% endif %}
+
+</body>
+</html>

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block page_actions %}
+  <a href="/clients/new" class="btn btn-secondary">Add Client</a>
+  <a href="/assessments/new" class="btn btn-primary">Start Assessment</a>
+{% endblock %}
+
+{% block content %}
+  <section class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Clients</div>
+      <div class="kpi-value">{{ client_count }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Assessments in progress</div>
+      <div class="kpi-value">{{ in_progress }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Assessments complete</div>
+      <div class="kpi-value">{{ complete }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Average posture score</div>
+      <div class="kpi-value">
+        {% if avg_score is not none %}{{ avg_score }}%{% else %}&mdash;{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <header class="card-header">
+        <h2>Recent assessments</h2>
+        <a href="/clients" class="link">View all</a>
+      </header>
+      {% if recent_assessments %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Year</th>
+              <th>Status</th>
+              <th>Score</th>
+              <th>Rating</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in recent_assessments %}
+              <tr>
+                <td><a href="/clients/{{ a.client_id }}">{{ a.client.name }}</a></td>
+                <td>{{ a.year }}</td>
+                <td>
+                  <span class="badge badge-{{ a.status.value }}">{{ a.status.value.replace('_', ' ') }}</span>
+                </td>
+                <td>{% if a.overall_score is not none %}{{ a.overall_score }}%{% else %}&mdash;{% endif %}</td>
+                <td>
+                  {% if a.risk_rating %}
+                    <span class="risk-pill risk-{{ a.risk_rating.value|lower }}">{{ a.risk_rating.value }}</span>
+                  {% else %}
+                    &mdash;
+                  {% endif %}
+                </td>
+                <td><a href="/assessments/{{ a.id }}" class="link">Open</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No assessments yet. Add a client and start an assessment to see activity here.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <header class="card-header">
+        <h2>Recently added clients</h2>
+        <a href="/clients/new" class="link">Add client</a>
+      </header>
+      {% if recent_clients %}
+        <ul class="plain-list">
+          {% for c in recent_clients %}
+            <li>
+              <a href="/clients/{{ c.id }}"><strong>{{ c.name }}</strong></a>
+              {% if c.industry %}<span class="muted"> &middot; {{ c.industry }}</span>{% endif %}
+              <span class="muted small"> &middot; added {{ c.created_at.strftime('%Y-%m-%d') }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No clients yet.</p>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}

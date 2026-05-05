@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block page_title %}{% if client %}Edit client{% else %}Add client{% endif %}{% endblock %}
+
+{% block page_actions %}
+  <a href="{% if client %}/clients/{{ client.id }}{% else %}/clients{% endif %}" class="btn btn-secondary">Cancel</a>
+{% endblock %}
+
+{% block content %}
+  {% if errors %}
+    <div class="alert alert-error">
+      <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  <form method="post"
+        action="{% if client %}/clients/{{ client.id }}/edit{% else %}/clients/new{% endif %}"
+        class="card form-card">
+    <div class="form-grid">
+      <label class="form-field">
+        <span>Client name <em>required</em></span>
+        <input type="text" name="name" value="{{ (client.name if client else (form.name if form is defined else '')) or '' }}" required maxlength="255" />
+      </label>
+
+      <label class="form-field">
+        <span>Industry</span>
+        <input type="text" name="industry" value="{{ (client.industry if client else (form.industry if form is defined else '')) or '' }}" maxlength="120" />
+      </label>
+
+      <label class="form-field">
+        <span>Primary contact name</span>
+        <input type="text" name="primary_contact_name" value="{{ (client.primary_contact_name if client else (form.primary_contact_name if form is defined else '')) or '' }}" maxlength="255" />
+      </label>
+
+      <label class="form-field">
+        <span>Primary contact email</span>
+        <input type="email" name="primary_contact_email" value="{{ (client.primary_contact_email if client else (form.primary_contact_email if form is defined else '')) or '' }}" maxlength="255" />
+      </label>
+
+      <label class="form-field">
+        <span>Phone</span>
+        <input type="text" name="phone" value="{{ (client.phone if client else (form.phone if form is defined else '')) or '' }}" maxlength="64" />
+      </label>
+
+      <label class="form-field form-field-wide">
+        <span>Address</span>
+        <textarea name="address" rows="2">{{ (client.address if client else (form.address if form is defined else '')) or '' }}</textarea>
+      </label>
+
+      <label class="form-field form-field-wide">
+        <span>Notes</span>
+        <textarea name="notes" rows="3">{{ (client.notes if client else (form.notes if form is defined else '')) or '' }}</textarea>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">{% if client %}Save changes{% else %}Create client{% endif %}</button>
+    </div>
+  </form>
+{% endblock %}

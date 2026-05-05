@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}{{ msp.company_name }} | Security Posture{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/main.css" />
+    <style>
+      :root {
+        --brand: {{ msp.primary_color or '#1f3a5f' }};
+        --brand-dark: #0e1f33;
+      }
+    </style>
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          {% if msp.logo_filename %}
+            <img src="/static/uploads/{{ msp.logo_filename }}" alt="{{ msp.company_name }} logo" class="brand-logo" />
+          {% else %}
+            <div class="brand-mark">{{ msp.company_name[:2]|upper }}</div>
+          {% endif %}
+          <div class="brand-text">
+            <div class="brand-name">{{ msp.company_name }}</div>
+            <div class="brand-sub">Security Posture</div>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+          <a href="/clients" class="nav-item {% if request.url.path.startswith('/clients') %}active{% endif %}">Clients</a>
+          <a href="/assessments/new" class="nav-item {% if request.url.path == '/assessments/new' %}active{% endif %}">New Assessment</a>
+          <a href="/settings" class="nav-item {% if request.url.path.startswith('/settings') %}active{% endif %}">Settings</a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <small>Internal use only</small>
+        </div>
+      </aside>
+
+      <main class="content">
+        {% block header %}
+          <header class="content-header">
+            <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+            <div class="page-actions">{% block page_actions %}{% endblock %}</div>
+          </header>
+        {% endblock %}
+
+        <div class="content-body">
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ client.name }} &middot; {{ assessment.year }} Assessment{% endblock %}
+
+{% block page_actions %}
+  <a href="/clients/{{ client.id }}" class="btn btn-secondary">Back to client</a>
+  <a href="/assessments/{{ assessment.id }}/summary" class="btn btn-secondary">Skip to summary</a>
+{% endblock %}
+
+{% block content %}
+  <div class="wizard-progress">
+    <div class="wizard-steps">
+      <strong>Section {{ section_index + 1 }} of {{ section_total }}</strong>
+      &middot; <span>{{ section.name }}</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-bar-fill"
+           style="width: {{ ((section_index + 1) / section_total * 100) | round(0, 'floor') }}%"></div>
+    </div>
+  </div>
+
+  <form method="post" action="/assessments/{{ assessment.id }}/sections/{{ section.key }}" class="card form-card">
+    <header class="card-header">
+      <div>
+        <h2>{{ section.name }}</h2>
+        <p class="muted">{{ section.description }}</p>
+      </div>
+    </header>
+
+    <ol class="question-list">
+      {% for q in section.questions %}
+        <li class="question">
+          <div class="question-text">
+            {{ q.text }}
+            <span class="question-weight" title="Question weight">weight {{ q.weight }}</span>
+          </div>
+          <div class="answer-options">
+            {% for opt in q.options %}
+              <label class="answer-option">
+                <input type="radio"
+                       name="q_{{ q.key }}"
+                       value="{{ opt.value }}"
+                       {% if answers.get(q.key) == opt.value %}checked{% endif %}
+                       required />
+                <span>{{ opt.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+
+    <div class="wizard-actions">
+      <div>
+        {% if prev_section_key %}
+          <button type="submit" name="direction" value="previous" class="btn btn-secondary">&larr; Previous</button>
+        {% endif %}
+      </div>
+      <div class="right-actions">
+        <button type="submit" name="direction" value="save" class="btn btn-secondary">Save</button>
+        {% if next_section_key %}
+          <button type="submit" name="direction" value="next" class="btn btn-primary">Save &amp; Continue &rarr;</button>
+        {% else %}
+          <button type="submit" name="direction" value="next" class="btn btn-primary">Save &amp; Review &rarr;</button>
+        {% endif %}
+      </div>
+    </div>
+  </form>
+
+  <nav class="section-rail card">
+    <h3>Sections</h3>
+    <ol class="section-rail-list">
+      {% set ns = namespace(idx=0) %}
+      {% for s in [
+        {'key': 'iam', 'name': 'Identity & Access Management'},
+        {'key': 'endpoint', 'name': 'Endpoint Security'},
+        {'key': 'network', 'name': 'Network Security'},
+        {'key': 'data', 'name': 'Data Protection & Backup'},
+        {'key': 'vuln', 'name': 'Vulnerability & Patch Management'},
+        {'key': 'awareness', 'name': 'Security Awareness & Training'},
+        {'key': 'ir', 'name': 'Incident Response & Business Continuity'},
+        {'key': 'compliance', 'name': 'Compliance & Governance'}
+      ] %}
+        <li class="{% if s.key == section.key %}current{% endif %}">
+          <a href="/assessments/{{ assessment.id }}/sections/{{ s.key }}">{{ s.name }}</a>
+        </li>
+      {% endfor %}
+    </ol>
+  </nav>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block page_title %}Start a new assessment{% endblock %}
+
+{% block page_actions %}
+  <a href="/clients" class="btn btn-secondary">Cancel</a>
+{% endblock %}
+
+{% block content %}
+  {% if errors %}
+    <div class="alert alert-error">
+      <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  {% if not clients %}
+    <div class="card empty-state">
+      <h3>No clients yet</h3>
+      <p>Add a client first, then start the assessment.</p>
+      <a href="/clients/new" class="btn btn-primary">Add Client</a>
+    </div>
+  {% else %}
+    <form method="post" action="/assessments/new" class="card form-card">
+      <div class="form-grid">
+        <label class="form-field">
+          <span>Client <em>required</em></span>
+          <select name="client_id" required>
+            <option value="" disabled {% if not selected_client %}selected{% endif %}>Select a client...</option>
+            {% for c in clients %}
+              <option value="{{ c.id }}" {% if selected_client and selected_client.id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="form-field">
+          <span>Assessment year <em>required</em></span>
+          <input type="number" name="year" min="2000" max="2100" value="{{ default_year }}" required />
+        </label>
+      </div>
+      <p class="muted small">If an assessment for this client and year already exists, you will be taken back to it to continue.</p>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Begin assessment</button>
+      </div>
+    </form>
+  {% endif %}
+{% endblock %}

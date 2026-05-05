@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block page_title %}Settings{% endblock %}
+
+{% block page_actions %}{% endblock %}
+
+{% block content %}
+  {% if request.query_params.get('saved') %}
+    <div class="alert alert-success">Settings saved.</div>
+  {% endif %}
+  {% if errors %}
+    <div class="alert alert-error">
+      <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  <form method="post" action="/settings" enctype="multipart/form-data" class="card form-card">
+    <header class="card-header">
+      <h2>MSP branding</h2>
+      <p class="muted">These details appear on every PDF report and across the dashboard. Changes apply to all future reports.</p>
+    </header>
+
+    <div class="form-grid">
+      <label class="form-field form-field-wide">
+        <span>Company name <em>required</em></span>
+        <input type="text" name="company_name" value="{{ settings.company_name or '' }}" required maxlength="255" />
+      </label>
+
+      <label class="form-field">
+        <span>Primary brand color (hex) <em>required</em></span>
+        <input type="color" name="primary_color" value="{{ settings.primary_color or '#1f3a5f' }}" />
+      </label>
+
+      <label class="form-field">
+        <span>Contact email</span>
+        <input type="email" name="contact_email" value="{{ settings.contact_email or '' }}" maxlength="255" />
+      </label>
+
+      <label class="form-field">
+        <span>Contact phone</span>
+        <input type="text" name="contact_phone" value="{{ settings.contact_phone or '' }}" maxlength="64" />
+      </label>
+
+      <label class="form-field form-field-wide">
+        <span>Report footer text</span>
+        <input type="text" name="report_footer_text" value="{{ settings.report_footer_text or '' }}" maxlength="512" />
+      </label>
+
+      {% set current_font = settings.report_font_family or 'Poppins' %}
+      {% set in_presets = current_font in font_presets %}
+      <label class="form-field">
+        <span>Report font</span>
+        <select name="report_font_family">
+          {% for f in font_presets %}
+            <option value="{{ f }}" {% if in_presets and f == current_font %}selected{% endif %}>{{ f }}{% if f == 'Poppins' %} (default){% endif %}</option>
+          {% endfor %}
+          <option value="" {% if not in_presets %}selected{% endif %}>-- Custom --</option>
+        </select>
+      </label>
+
+      <label class="form-field">
+        <span>Custom font name (optional)</span>
+        <input type="text" name="report_font_custom"
+               placeholder="e.g. Raleway"
+               value="{% if not in_presets %}{{ current_font }}{% endif %}"
+               maxlength="120" />
+        <small class="muted">Overrides the dropdown above. Any Google Fonts family name is accepted; falls back to a system font if Google Fonts is unreachable.</small>
+      </label>
+
+      <div class="form-field form-field-wide">
+        <span>Company logo</span>
+        <div class="logo-row">
+          <div class="logo-preview">
+            {% if settings.logo_filename %}
+              <img src="/static/uploads/{{ settings.logo_filename }}?t={{ settings.updated_at.timestamp()|int }}" alt="Logo preview" />
+            {% else %}
+              <div class="logo-placeholder">No logo uploaded</div>
+            {% endif %}
+          </div>
+          <div class="logo-upload">
+            <input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" />
+            {% if settings.logo_filename %}
+              <label class="checkbox">
+                <input type="checkbox" name="remove_logo" value="1" />
+                Remove current logo
+              </label>
+            {% endif %}
+            <p class="muted small">Recommended: PNG with transparent background, 600px wide or larger.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Save settings</button>
+    </div>
+  </form>
+{% endblock %}

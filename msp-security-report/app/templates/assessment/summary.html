@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ client.name }} &middot; {{ assessment.year }} Summary{% endblock %}
+
+{% block page_actions %}
+  <a href="/assessments/{{ assessment.id }}" class="btn btn-secondary">Edit answers</a>
+  <a href="/clients/{{ client.id }}" class="btn btn-secondary">Back to client</a>
+{% endblock %}
+
+{% block content %}
+  <section class="summary-hero card">
+    <div class="summary-hero-left">
+      <div class="muted small">Overall security posture score</div>
+      <div class="score-large">{{ result.percentage_int }}%</div>
+      <div class="muted small">Based on {{ answered_questions }} of {{ total_questions }} questions answered</div>
+    </div>
+    <div class="summary-hero-right">
+      <div class="muted small">Risk rating</div>
+      <span class="risk-pill risk-pill-large risk-{{ result.risk_rating.value|lower }}">{{ result.risk_rating.value }}</span>
+      {% if result.nessus_deduction > 0 %}
+        <div class="muted small">Nessus deduction applied: -{{ '%.1f'|format(result.nessus_deduction) }} points</div>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if executive_findings %}
+    <section class="card">
+      <header class="card-header"><h2>Executive findings</h2></header>
+      <ul class="findings-list">
+        {% for f in executive_findings %}<li>{{ f }}</li>{% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
+  <section class="card">
+    <header class="card-header"><h2>Section breakdown</h2></header>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Section</th>
+          <th>Score</th>
+          <th>Coverage</th>
+          <th>Posture</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in result.sections %}
+          <tr {% if s.is_low_scoring and s.possible > 0 %}class="row-warn"{% endif %}>
+            <td><strong>{{ s.name }}</strong>
+              <div class="muted small">{{ s.answered }} of {{ s.total }} answered</div>
+            </td>
+            <td>
+              {% if s.possible > 0 %}{{ '%.0f'|format(s.percentage) }}%{% else %}&mdash;{% endif %}
+            </td>
+            <td>
+              <div class="progress-bar progress-bar-thin">
+                <div class="progress-bar-fill" style="width: {% if s.possible > 0 %}{{ s.percentage|round(0,'floor') }}{% else %}0{% endif %}%"></div>
+              </div>
+            </td>
+            <td>
+              {% if s.possible == 0 %}
+                <span class="muted">Not yet answered</span>
+              {% elif s.percentage >= 85 %}
+                <span class="badge badge-good">Strong</span>
+              {% elif s.percentage >= 60 %}
+                <span class="badge badge-warn">Moderate</span>
+              {% else %}
+                <span class="badge badge-bad">Needs attention</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <header class="card-header">
+      <h2>Vulnerability scan (optional)</h2>
+      {% if assessment.nessus_csv_filename %}
+        <form method="post" action="/assessments/{{ assessment.id }}/nessus/clear">
+          <button type="submit" class="link link-danger">Remove uploaded scan</button>
+        </form>
+      {% endif %}
+    </header>
+
+    {% if nessus_error %}
+      <div class="alert alert-error">{{ nessus_error }}</div>
+    {% endif %}
+
+    {% if assessment.nessus_summary %}
+      {% set ns = assessment.nessus_summary %}
+      <p class="muted">File: <code>{{ assessment.nessus_csv_filename }}</code> — {{ ns.row_count }} findings parsed.</p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Informational</th><th>Score deduction</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>{{ ns.severity_counts.Critical or 0 }}</strong></td>
+            <td>{{ ns.severity_counts.High or 0 }}</td>
+            <td>{{ ns.severity_counts.Medium or 0 }}</td>
+            <td>{{ ns.severity_counts.Low or 0 }}</td>
+            <td>{{ ns.severity_counts.Informational or 0 }}</td>
+            <td>-{{ '%.1f'|format(ns.deduction_points) }} pts</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {% if ns.top_findings %}
+        <h3 class="section-sub">Top 10 findings</h3>
+        <table class="data-table data-table-compact">
+          <thead>
+            <tr>
+              <th>Plugin</th><th>Host</th><th>Severity</th><th>CVSS</th><th>Synopsis</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in ns.top_findings %}
+              <tr>
+                <td>{{ f.plugin_name }}</td>
+                <td><code>{{ f.host }}</code></td>
+                <td><span class="risk-pill risk-{{ f.severity|lower }}">{{ f.severity }}</span></td>
+                <td>{{ f.cvss if f.cvss is not none else '—' }}</td>
+                <td class="muted">{{ f.synopsis or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% else %}
+      <form method="post"
+            enctype="multipart/form-data"
+            action="/assessments/{{ assessment.id }}/nessus"
+            class="upload-form">
+        <label class="form-field">
+          <span>Upload Nessus CSV (optional)</span>
+          <input type="file" name="nessus_csv" accept=".csv" required />
+        </label>
+        <button type="submit" class="btn btn-secondary">Upload &amp; Parse</button>
+        <p class="muted small">Standard Nessus export. Critical and High severity findings will adjust the posture score.</p>
+      </form>
+    {% endif %}
+  </section>
+
+  {% if recommendations %}
+    <section class="card">
+      <header class="card-header"><h2>Recommendations preview</h2></header>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Priority</th>
+            <th>Section</th>
+            <th>Recommendation</th>
+            <th>Rationale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in recommendations %}
+            <tr>
+              <td>
+                <span class="risk-pill risk-{% if r.priority == 'Critical' %}critical{% elif r.priority == 'High' %}high{% else %}medium{% endif %}">{{ r.priority }}</span>
+              </td>
+              <td>{{ r.section_name }}</td>
+              <td>{{ r.text }}</td>
+              <td class="muted small">{{ r.rationale }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+
+  <section class="card cta-card">
+    <header class="card-header">
+      <h2>Generate the report</h2>
+    </header>
+    <p>Producing the PDF will mark the assessment as complete and store the report against this client. You can re-generate at any time.</p>
+    <form method="post" action="/reports/assessments/{{ assessment.id }}/generate">
+      <button type="submit" class="btn btn-primary btn-large">Generate PDF report</button>
+    </form>
+  </section>
+{% endblock %}
