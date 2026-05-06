@@ -65,6 +65,17 @@
                 </td>
                 <td>
                   <a href="/assessments/{{ a.id }}" class="link">Open</a>
+                  {% if a.status.value == 'complete' %}
+                    <form method="post" action="/assessments/{{ a.id }}/reopen" style="display:inline">
+                      <button type="submit" class="link">Reopen</button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="/assessments/{{ a.id }}/close"
+                          onsubmit="return confirm('Close this assessment? You can reopen it later if needed.');"
+                          style="display:inline">
+                      <button type="submit" class="link">Close</button>
+                    </form>
+                  {% endif %}
                   <form method="post" action="/assessments/{{ a.id }}/delete"
                         onsubmit="return confirm('Delete this assessment? This cannot be undone.');"
                         style="display:inline">

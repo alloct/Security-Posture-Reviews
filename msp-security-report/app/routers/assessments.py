@@ -6,10 +6,11 @@ Handles:
   * Per-section answer saving
   * Optional Nessus CSV upload + preview
   * The summary page that shows the score before report generation
+  * Close / reopen assessment lifecycle actions
 """
 from __future__ import annotations
 
-import shutil
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import (
     get_db,
+    report_dir_path,
     template_context,
     templates,
     upload_dir,
@@ -45,6 +47,40 @@ from app.services.scoring import (
 
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
+
+
+# Hard cap on Nessus CSV uploads. The full file is read into memory for the
+# pandas parser, so we refuse anything that would obviously be abusive on a
+# small internal host. 50 MiB comfortably handles real-world enterprise scans.
+_MAX_NESSUS_BYTES = 50 * 1024 * 1024
+
+# Sanitiser for the user-supplied portion of the stored Nessus filename.
+_FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _sanitise_filename_component(value: str) -> str:
+    """Reduce a user-supplied filename to a safe, filesystem-friendly slug."""
+    base = Path(value or "").name
+    cleaned = _FILENAME_UNSAFE.sub("_", base).strip("._") or "upload"
+    return cleaned[:80]
+
+
+def _delete_assessment_files(assessment: Assessment) -> None:
+    """Best-effort removal of every file produced for this assessment."""
+    if assessment.nessus_csv_filename:
+        target = upload_dir() / assessment.nessus_csv_filename
+        try:
+            if target.exists():
+                target.unlink()
+        except OSError:
+            pass
+    for record in list(assessment.reports):
+        path = report_dir_path() / record.filename
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -179,6 +215,7 @@ def show_section(
         section=section,
         section_index=idx,
         section_total=len(SECTIONS),
+        all_sections=SECTIONS,
         answers=answers_map,
         prev_section_key=prev_key,
         next_section_key=next_key,
@@ -262,7 +299,10 @@ async def save_section(
 
 @router.get("/{assessment_id}/summary", response_class=HTMLResponse)
 def assessment_summary(
-    assessment_id: int, request: Request, db: Session = Depends(get_db)
+    assessment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    generated: int = 0,
 ):
     a = _get_assessment_or_404(db, assessment_id)
     result = score_assessment(a)
@@ -277,6 +317,11 @@ def assessment_summary(
     total_questions = sum(len(s["questions"]) for s in SECTIONS)
     answered = len(a.answers)
 
+    # generated is the GeneratedReport.id we just created; 0 means this isn't
+    # a post-generation visit. The template uses it to highlight the new row
+    # and trigger the download.
+    just_generated_id = generated or 0
+
     ctx = template_context(
         request,
         db,
@@ -287,6 +332,7 @@ def assessment_summary(
         executive_findings=findings,
         total_questions=total_questions,
         answered_questions=answered,
+        report_just_generated=just_generated_id,
     )
     return templates.TemplateResponse("assessment/summary.html", ctx)
 
@@ -310,7 +356,29 @@ async def upload_nessus(
     if not nessus_csv.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a .csv export from Nessus")
 
-    payload = await nessus_csv.read()
+    # Stream-read with a hard size cap so a malicious or accidental huge
+    # upload cannot OOM the server. UploadFile is backed by SpooledTemporaryFile.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await nessus_csv.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_NESSUS_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Nessus CSV is too large (limit "
+                    f"{_MAX_NESSUS_BYTES // (1024 * 1024)} MiB)."
+                ),
+            )
+        chunks.append(chunk)
+    payload = b"".join(chunks)
+
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
     try:
         _, summary = parse_and_summarise(payload)
     except NessusParseError as exc:
@@ -334,8 +402,18 @@ async def upload_nessus(
             "assessment/summary.html", ctx, status_code=400
         )
 
-    # Persist the file to disk for record-keeping.
-    safe_name = f"nessus_{a.id}_{uuid.uuid4().hex[:8]}_{Path(nessus_csv.filename).name}"
+    # If a previous CSV was attached, remove it before overwriting so we don't
+    # leak files on disk. The DB row is overwritten below.
+    if a.nessus_csv_filename:
+        old = upload_dir() / a.nessus_csv_filename
+        try:
+            if old.exists():
+                old.unlink()
+        except OSError:
+            pass
+
+    safe_user_part = _sanitise_filename_component(nessus_csv.filename)
+    safe_name = f"nessus_{a.id}_{uuid.uuid4().hex[:8]}_{safe_user_part}"
     target = upload_dir() / safe_name
     with target.open("wb") as fh:
         fh.write(payload)
@@ -375,19 +453,52 @@ def clear_nessus(assessment_id: int, db: Session = Depends(get_db)):
     )
 
 
+# ----------------------------------------------------------------------------
+# Lifecycle actions: close / reopen
+# ----------------------------------------------------------------------------
+
+@router.post("/{assessment_id}/close")
+def close_assessment(assessment_id: int, db: Session = Depends(get_db)):
+    """Mark an assessment as complete without generating a report.
+
+    Useful when a year's review has been written up out-of-band, or when the
+    assessment is being parked rather than reported on.
+    """
+    a = _get_assessment_or_404(db, assessment_id)
+    if a.status != AssessmentStatus.complete:
+        a.status = AssessmentStatus.complete
+        a.completed_at = datetime.utcnow()
+        # Keep the latest score on the record so the dashboard reflects it.
+        result = score_assessment(a)
+        a.overall_score = round(result.percentage, 1)
+        a.risk_rating = result.risk_rating
+        db.commit()
+    return RedirectResponse(
+        url=f"/assessments/{a.id}/summary", status_code=303
+    )
+
+
+@router.post("/{assessment_id}/reopen")
+def reopen_assessment(assessment_id: int, db: Session = Depends(get_db)):
+    """Reopen a completed assessment so answers can be edited again."""
+    a = _get_assessment_or_404(db, assessment_id)
+    if a.status != AssessmentStatus.in_progress:
+        a.status = AssessmentStatus.in_progress
+        a.completed_at = None
+        db.commit()
+    return RedirectResponse(
+        url=f"/assessments/{a.id}/summary", status_code=303
+    )
+
+
 @router.post("/{assessment_id}/delete")
 def delete_assessment(assessment_id: int, db: Session = Depends(get_db)):
     a = _get_assessment_or_404(db, assessment_id)
     client_id = a.client_id
 
-    # Best-effort cleanup of any uploaded Nessus CSV and generated reports.
-    if a.nessus_csv_filename:
-        f = upload_dir() / a.nessus_csv_filename
-        if f.exists():
-            try:
-                f.unlink()
-            except OSError:
-                pass
+    # Best-effort cleanup of every file produced for this assessment, including
+    # Nessus CSV and generated PDF reports. The DB rows themselves cascade.
+    _delete_assessment_files(a)
 
     db.delete(a)
     db.commit()

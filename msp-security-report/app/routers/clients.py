@@ -5,10 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.dependencies import get_db, template_context, templates
-from app.models import Client
+from app.models import Assessment, Client
+from app.routers.assessments import _delete_assessment_files
 
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -79,7 +80,17 @@ def create_client(
 def client_detail(
     client_id: int, request: Request, db: Session = Depends(get_db)
 ) -> HTMLResponse:
-    client = db.get(Client, client_id)
+    # Eagerly load assessments and their reports so the page never relies on
+    # lazy-load timing and always reflects the latest state of the database
+    # (including reports generated moments before this request).
+    client = (
+        db.query(Client)
+        .options(
+            selectinload(Client.assessments).selectinload(Assessment.reports)
+        )
+        .filter(Client.id == client_id)
+        .first()
+    )
     if client is None:
         raise HTTPException(status_code=404, detail="Client not found")
     ctx = template_context(request, db, client=client)
@@ -143,6 +154,13 @@ def delete_client(client_id: int, db: Session = Depends(get_db)):
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    # The DB cascade will drop assessments + answers + report rows, but the
+    # files on disk would otherwise be orphaned. Clean them up best-effort
+    # before the cascade runs.
+    for assessment in list(client.assessments):
+        _delete_assessment_files(assessment)
+
     db.delete(client)
     db.commit()
     return RedirectResponse(url="/clients", status_code=303)

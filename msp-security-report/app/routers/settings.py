@@ -23,7 +23,13 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
-_ALLOWED_LOGO_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+# SVG is intentionally excluded: even on an internal tool, an attacker-controlled
+# SVG served from /static/uploads/ can carry inline <script> and execute in any
+# admin's browser. Stick to raster image formats which the browser cannot treat
+# as active content.
+_ALLOWED_LOGO_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+# Hard cap on logo uploads to keep the PDF cover responsive and prevent abuse.
+_MAX_LOGO_BYTES = 5 * 1024 * 1024
 
 # Curated list of professional Google Fonts for the PDF report. Users can also
 # enter a custom family name; the report template will request the font from
@@ -119,24 +125,35 @@ async def save_settings(
         ext = Path(logo.filename).suffix.lower()
         if ext not in _ALLOWED_LOGO_EXT:
             errors.append(
-                "Logo must be PNG, JPG, JPEG, WEBP, GIF or SVG."
+                "Logo must be PNG, JPG, JPEG, WEBP, or GIF."
             )
         else:
             payload = await logo.read()
-            if payload:
-                # Remove the previous logo if any.
-                if settings.logo_filename:
-                    old = upload_dir() / settings.logo_filename
-                    if old.exists():
-                        try:
-                            old.unlink()
-                        except OSError:
-                            pass
+            if len(payload) > _MAX_LOGO_BYTES:
+                errors.append(
+                    f"Logo file is too large (limit "
+                    f"{_MAX_LOGO_BYTES // (1024 * 1024)} MiB)."
+                )
+            elif payload:
+                # Write the new file FIRST and only then delete the old one,
+                # so a failed write doesn't leave the MSP without a logo.
                 new_name = f"logo_{uuid.uuid4().hex[:10]}{ext}"
                 target = upload_dir() / new_name
-                with target.open("wb") as fh:
-                    fh.write(payload)
-                settings.logo_filename = new_name
+                try:
+                    with target.open("wb") as fh:
+                        fh.write(payload)
+                except OSError as exc:
+                    errors.append(f"Could not save uploaded logo: {exc}")
+                else:
+                    previous = settings.logo_filename
+                    settings.logo_filename = new_name
+                    if previous:
+                        old = upload_dir() / previous
+                        try:
+                            if old.exists():
+                                old.unlink()
+                        except OSError:
+                            pass
 
     # Optionally remove the existing logo.
     if remove_logo == "1" and settings.logo_filename:

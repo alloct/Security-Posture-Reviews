@@ -8,11 +8,23 @@
 {% endblock %}
 
 {% block content %}
+  {% if report_just_generated %}
+    <div class="alert alert-success">
+      <strong>Report generated.</strong>
+      The PDF download should start automatically. If it does not, use the download link below.
+    </div>
+  {% endif %}
+
   <section class="summary-hero card">
     <div class="summary-hero-left">
       <div class="muted small">Overall security posture score</div>
       <div class="score-large">{{ result.percentage_int }}%</div>
-      <div class="muted small">Based on {{ answered_questions }} of {{ total_questions }} questions answered</div>
+      <div class="muted small">
+        Based on {{ answered_questions }} of {{ total_questions }} questions answered
+        &middot;
+        Status:
+        <span class="badge badge-{{ assessment.status.value }}">{{ assessment.status.value.replace('_', ' ') }}</span>
+      </div>
     </div>
     <div class="summary-hero-right">
       <div class="muted small">Risk rating</div>
@@ -177,9 +189,88 @@
     <header class="card-header">
       <h2>Generate the report</h2>
     </header>
-    <p>Producing the PDF will mark the assessment as complete and store the report against this client. You can re-generate at any time.</p>
+    <p>
+      Producing the PDF will mark the assessment as complete and store a
+      versioned copy in the report archive below. You can regenerate at any
+      time &mdash; previous PDFs are kept.
+    </p>
     <form method="post" action="/reports/assessments/{{ assessment.id }}/generate">
       <button type="submit" class="btn btn-primary btn-large">Generate PDF report</button>
     </form>
   </section>
+
+  <section class="card">
+    <header class="card-header">
+      <h2>Report archive</h2>
+      {% if assessment.reports %}
+        <span class="muted small">{{ assessment.reports|length }} report{{ '' if assessment.reports|length == 1 else 's' }} on file</span>
+      {% endif %}
+    </header>
+    {% if assessment.reports %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Generated</th>
+            <th>File</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in assessment.reports %}
+            <tr>
+              <td>{{ r.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
+              <td class="muted small"><code>{{ r.filename }}</code></td>
+              <td>
+                <a href="/reports/{{ r.id }}/download" class="link"
+                   {% if r.id == report_just_generated %}id="auto-download"{% endif %}>
+                  Download
+                </a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No reports have been generated for this assessment yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <header class="card-header">
+      <h2>Assessment lifecycle</h2>
+    </header>
+    {% if assessment.status.value == 'complete' %}
+      <p class="muted">
+        This assessment is closed
+        {% if assessment.completed_at %}(completed {{ assessment.completed_at.strftime('%Y-%m-%d %H:%M UTC') }}){% endif %}.
+        Reopen it if you need to revise answers or upload a different vulnerability scan.
+      </p>
+      <form method="post" action="/assessments/{{ assessment.id }}/reopen">
+        <button type="submit" class="btn btn-secondary">Reopen assessment</button>
+      </form>
+    {% else %}
+      <p class="muted">
+        Closing the assessment marks it complete without producing a PDF. Use this
+        when the year's review has been delivered out-of-band, or when you simply
+        want to lock it in.
+      </p>
+      <form method="post" action="/assessments/{{ assessment.id }}/close"
+            onsubmit="return confirm('Close this assessment? You can reopen it later if needed.');">
+        <button type="submit" class="btn btn-secondary">Close assessment</button>
+      </form>
+    {% endif %}
+  </section>
+
+  {% if report_just_generated %}
+    <script>
+      (function () {
+        var el = document.getElementById('auto-download');
+        if (el && el.href) {
+          // Trigger the download in the same tab so the user gets the file
+          // straight away while remaining on the (now up-to-date) summary page.
+          window.setTimeout(function () { window.location.href = el.href; }, 200);
+        }
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

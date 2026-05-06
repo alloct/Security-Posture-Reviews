@@ -264,6 +264,139 @@ For every question that scored less than full marks the engine emits a
 recommendation, prioritised as Critical, High, or Medium based on weight and
 answer. The PDF groups them in priority order.
 
+---
+
+## Adding a new question (or new section)
+
+The question catalogue lives in `app/services/questions.py`. It is a plain
+Python data structure, intentionally not stored in the database, so changes
+are version-controlled and reviewable via diffs. There are no migrations to
+write when you add or change questions - only when you change the database
+**schema**.
+
+### 1. Choose where the question belongs
+
+Open `app/services/questions.py` and find the `SECTIONS` list. Each entry is a
+section dict with a `key`, `name`, `description`, and a `questions` list. Pick
+the most relevant section, or scroll down to "If you are adding a brand-new
+section" below.
+
+### 2. Pick a stable `key`
+
+The `key` is the database identifier for every answer to this question. Once a
+client has answered it, you must **never** change the key again or you will
+orphan their answer history. Conventions used in the existing catalogue:
+
+- Lower-case, underscore-separated.
+- Prefixed with the section key (`iam_`, `ep_`, `net_`, `data_`, `vm_`,
+  `aw_`, `ir_`, `gov_`).
+- Suffix that describes the control (`iam_admin_mfa`, `ep_edr_coverage`).
+
+If you change a key by mistake, the scoring engine will silently ignore the
+orphaned answer rows; their previous score will not be counted. To recover,
+either restore the original key or write a one-off SQL update against
+`assessment_answers.question_key`.
+
+### 3. Choose a weight
+
+Weight reflects criticality. The codebase uses three bands:
+
+| Weight | Meaning                                                   |
+| ------ | --------------------------------------------------------- |
+| 3      | Foundational control. Failure is materially risky on its own (e.g. admin MFA, EDR coverage, immutable backups). |
+| 2      | Important control where partial implementation is common. |
+| 1      | Hygiene / governance control with diffuse impact.         |
+
+Weight directly influences both the maximum achievable score and the priority
+the recommendations engine assigns to gaps.
+
+### 4. Define the answer options
+
+Each option needs a `value`, a display `label`, and a `score` factor in
+`[0.0, 1.0]`. Reuse the existing `_YES_PARTIAL_NO` or `_YES_NO` constants if
+they fit; otherwise define an inline list. Conventions:
+
+- `value` is lower-case and stored verbatim in the database. Pick a stable
+  string (`yes`, `partial`, `no`, `unknown`, `informal`, ...).
+- The `label` is what users see in the wizard.
+- A score of `0.5` represents a half-credit answer (e.g. "Partial",
+  "Informal", "Untested").
+- A score of `1.0` represents a fully implemented control.
+- A score of `0.0` represents a missing control.
+
+### 5. (Recommended) Provide a `recommendation`
+
+Any question with a non-empty `recommendation` will produce a remediation row
+in the PDF when the answer scores less than full marks. Keep the wording
+prescriptive and outcome-focused; it is what shows up in the client-facing
+report.
+
+If a question is informational only (e.g. "Is the organisation regulated?"),
+omit the `recommendation` or set it to `""` so the engine ignores it.
+
+### 6. Worked example
+
+Add a new question to the Endpoint Security section that asks about mobile
+device management:
+
+```python
+{
+    "key": "ep_mdm",
+    "text": "Are mobile devices managed via an MDM/UEM with policy enforcement?",
+    "weight": 2,
+    "options": _YES_PARTIAL_NO,
+    "recommendation": (
+        "Enrol every corporate-owned mobile device in an MDM/UEM platform "
+        "with screen-lock, encryption, and remote-wipe policies enforced."
+    ),
+},
+```
+
+Drop that dict into the `endpoint` section's `questions` list. Restart the
+container (or reload uvicorn) and the question appears in the wizard, scoring
+engine, and recommendations table immediately. Existing in-progress
+assessments will simply show the new question as unanswered until the user
+revisits the section.
+
+### 7. Adding a brand-new section
+
+To add a ninth control domain (say "Cloud & SaaS"):
+
+1. Append a new section dict to `SECTIONS` with a unique `key`, a `name`, a
+   `description`, and a list of `questions`.
+2. Add a section-summary clause to the methodology paragraph in
+   `app/templates/report/report_template.html` if you want it called out by
+   name.
+3. Restart the app. The wizard sidebar, the section-by-section breakdown
+   table, and the executive summary all derive from `SECTIONS` so no further
+   template edits are required.
+
+### 8. Editing an existing question
+
+Editing the `text`, `weight`, `options[*].score`, or `recommendation` is safe
+without a migration: existing answers continue to score against the new
+definition (the answer's `value` is mapped to the new option list at scoring
+time). The historical `answer_label` on each row is left as it was when the
+user answered, but the live scoring uses the current option list, so
+percentages will reflect the new weights immediately.
+
+If you change an option's `value` you will orphan any answer rows that store
+the old value - they will score 0. Prefer adding a new option and leaving the
+old one in place if you need to evolve the answer set.
+
+### 9. Removing a question
+
+Deleting a question from the catalogue removes it from new assessments and
+removes it from the scoring engine going forward. Old answer rows remain in
+the database (so the assessment history is not destructively edited) but no
+longer contribute to scores. To purge them entirely, run:
+
+```sql
+DELETE FROM assessment_answers WHERE question_key = 'ep_old_thing';
+```
+
+against the SQLite database.
+
 ### Report generation
 
 `report_generator.py` renders `templates/report/report_template.html` to a PDF
@@ -379,6 +512,17 @@ docker compose exec app alembic upgrade head
   seconds to render. The default uvicorn worker count is fine.
 - **Time zones.** All timestamps are stored in UTC. The PDF cover page formats
   the generation date in `dd Month YYYY`.
+- **Concurrent edits.** SQLite serialises writes; the app does not implement
+  optimistic locking. If two operators edit the same assessment at the same
+  moment, the last save wins. This is acceptable for the intended single-user
+  workflow but worth knowing.
+- **Google Fonts at render time.** When a non-default font is selected, the
+  PDF template fetches the family from Google Fonts during WeasyPrint
+  rendering. If the host has no outbound internet access, the renderer falls
+  back to DejaVu / Liberation - the report still renders, it just uses the
+  fallback face.
+- **Upload limits.** Logos are capped at 5 MiB and Nessus CSVs at 50 MiB. SVG
+  logos are not accepted because they can carry inline JavaScript.
 
 ---
 

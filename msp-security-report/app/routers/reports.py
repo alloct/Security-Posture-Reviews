@@ -29,7 +29,15 @@ def generate(assessment_id: int, db: Session = Depends(get_db)):
         a.completed_at = datetime.utcnow()
         db.commit()
 
-    return RedirectResponse(url=f"/reports/{record.id}/download", status_code=303)
+    # Send the user back to the summary page rather than straight into the file
+    # download. This guarantees they see the freshly generated report in the
+    # report history list (and the client dashboard reflects it on next view),
+    # while the summary template auto-triggers a download of the new report so
+    # the convenience of the previous flow is preserved.
+    return RedirectResponse(
+        url=f"/assessments/{a.id}/summary?generated={record.id}",
+        status_code=303,
+    )
 
 
 @router.get("/{report_id}/download")
@@ -38,7 +46,14 @@ def download(report_id: int, db: Session = Depends(get_db)):
     if record is None:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    path = report_dir_path() / record.filename
+    base = report_dir_path().resolve()
+    path = (base / record.filename).resolve()
+    # Guard against a corrupted DB row trying to escape the report directory.
+    try:
+        path.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid report path.")
+
     if not path.exists():
         raise HTTPException(
             status_code=404,
@@ -48,9 +63,8 @@ def download(report_id: int, db: Session = Depends(get_db)):
             ),
         )
 
-    download_name = record.filename
     return FileResponse(
         path=str(path),
         media_type="application/pdf",
-        filename=download_name,
+        filename=record.filename,
     )

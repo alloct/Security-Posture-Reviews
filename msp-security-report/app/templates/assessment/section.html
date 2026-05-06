@@ -70,17 +70,7 @@
   <nav class="section-rail card">
     <h3>Sections</h3>
     <ol class="section-rail-list">
-      {% set ns = namespace(idx=0) %}
-      {% for s in [
-        {'key': 'iam', 'name': 'Identity & Access Management'},
-        {'key': 'endpoint', 'name': 'Endpoint Security'},
-        {'key': 'network', 'name': 'Network Security'},
-        {'key': 'data', 'name': 'Data Protection & Backup'},
-        {'key': 'vuln', 'name': 'Vulnerability & Patch Management'},
-        {'key': 'awareness', 'name': 'Security Awareness & Training'},
-        {'key': 'ir', 'name': 'Incident Response & Business Continuity'},
-        {'key': 'compliance', 'name': 'Compliance & Governance'}
-      ] %}
+      {% for s in all_sections %}
         <li class="{% if s.key == section.key %}current{% endif %}">
           <a href="/assessments/{{ assessment.id }}/sections/{{ s.key }}">{{ s.name }}</a>
         </li>

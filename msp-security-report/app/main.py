@@ -13,18 +13,20 @@ The application:
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 from app.database import Base, engine, get_db
-from app.dependencies import get_settings, template_context, templates
+from app.dependencies import template_context, templates
 from app.models import Assessment, AssessmentStatus, Client, MSPSettings
 from app.routers import assessments, clients, reports, settings
 
@@ -58,6 +60,34 @@ def _bootstrap_db() -> None:
             session.commit()
 
 
+class NoStoreHTMLMiddleware(BaseHTTPMiddleware):
+    """Set ``Cache-Control: no-store`` on dynamic HTML responses.
+
+    Without this, browsers may serve a stale rendering of pages like the
+    client detail (e.g. via the bfcache when the user clicks Back after a
+    report download), which makes freshly generated reports appear missing.
+    Static assets under ``/static`` are not affected.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            return response
+        ctype = response.headers.get("content-type", "")
+        if ctype.startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _bootstrap_db()
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="MSP Security Posture Report",
@@ -66,7 +96,10 @@ def create_app() -> FastAPI:
             "security posture assessments and produce branded PDF reports."
         ),
         version="1.0.0",
+        lifespan=_lifespan,
     )
+
+    app.add_middleware(NoStoreHTMLMiddleware)
 
     static_dir = _BASE / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
@@ -76,10 +109,6 @@ def create_app() -> FastAPI:
     app.include_router(assessments.router)
     app.include_router(reports.router)
     app.include_router(settings.router)
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        _bootstrap_db()
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:

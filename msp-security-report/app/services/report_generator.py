@@ -93,6 +93,26 @@ def _risk_palette(primary_color: str) -> dict:
     }
 
 
+def _css_string(value: object) -> str:
+    """Return ``value`` rendered as a safe CSS string literal *without* quotes.
+
+    The result is intended to be embedded inside a double-quoted CSS string
+    such as ``content: "...";`` and is expected to be paired with HTML escaping
+    of the surrounding template. We strip quotes, semicolons, and braces so a
+    crafted MSP company name cannot break out of the surrounding CSS rule.
+    """
+    text = "" if value is None else str(value)
+    # Drop control characters (including newlines) and CSS-significant chars.
+    cleaned = []
+    for ch in text:
+        if ch in {"\\", '"', "'", ";", "{", "}", "<", ">"}:
+            continue
+        if ord(ch) < 0x20:
+            continue
+        cleaned.append(ch)
+    return "".join(cleaned)[:120]
+
+
 def _build_jinja_env() -> Environment:
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),
@@ -102,6 +122,7 @@ def _build_jinja_env() -> Environment:
     )
     env.filters["round1"] = lambda x: f"{x:.1f}" if isinstance(x, (int, float)) else x
     env.filters["pct"] = lambda x: f"{int(round(float(x)))}%" if x is not None else "n/a"
+    env.filters["css_string"] = _css_string
     return env
 
 
