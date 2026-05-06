@@ -19,19 +19,34 @@
     </div>
   </div>
 
-  <form method="post" action="/assessments/{{ assessment.id }}/sections/{{ section.key }}" class="card form-card">
+  <form method="post" action="/assessments/{{ assessment.id }}/sections/{{ section.key }}" class="card form-card" id="section-form">
     <header class="card-header">
       <div>
         <h2>{{ section.name }}</h2>
         <p class="muted">{{ section.description }}</p>
       </div>
+      {% if has_prior %}
+        <label class="checkbox" title="Hide questions whose answer is the same as {{ prior_year }}">
+          <input type="checkbox" id="changed-only-toggle" />
+          Show changed since {{ prior_year }} only
+        </label>
+      {% endif %}
     </header>
 
     <ol class="question-list">
-      {% for q in section.questions %}
-        <li class="question">
+      {% for q in decorated_questions %}
+        <li class="question" data-change-state="{{ q.change_state }}">
           <div class="question-text">
-            {{ q.text }}
+            <span>
+              {{ q.text }}
+              {% if q.change_state == 'changed' %}
+                <span class="badge badge-warn small" title="Answer differs from {{ q.prior.year }}">Updated since {{ q.prior.year }}</span>
+              {% elif q.change_state == 'needs_review' %}
+                <span class="badge badge-bad small" title="No answer yet for this question">Needs review</span>
+              {% elif q.change_state == 'unchanged' %}
+                <span class="badge small" title="Same as {{ q.prior.year }}">Same as {{ q.prior.year }}</span>
+              {% endif %}
+            </span>
             <span class="question-weight" title="Question weight">weight {{ q.weight }}</span>
           </div>
           <div class="answer-options">
@@ -46,6 +61,11 @@
               </label>
             {% endfor %}
           </div>
+          <details class="question-notes" {% if notes.get(q.key) %}open{% endif %}>
+            <summary>Notes / evidence{% if notes.get(q.key) %} <span class="muted small">(written)</span>{% endif %}</summary>
+            <textarea name="notes_{{ q.key }}" rows="2"
+                      placeholder="Optional context, evidence, or exceptions worth recording (e.g. tool names, scope notes, granted exceptions).">{{ notes.get(q.key) or '' }}</textarea>
+          </details>
         </li>
       {% endfor %}
     </ol>
@@ -66,6 +86,19 @@
       </div>
     </div>
   </form>
+
+  {% if has_prior %}
+    <script>
+      (function () {
+        var toggle = document.getElementById('changed-only-toggle');
+        var form = document.getElementById('section-form');
+        if (!toggle || !form) return;
+        toggle.addEventListener('change', function () {
+          form.classList.toggle('changed-only', toggle.checked);
+        });
+      })();
+    </script>
+  {% endif %}
 
   <nav class="section-rail card">
     <h3>Sections</h3>

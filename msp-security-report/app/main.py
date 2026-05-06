@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
@@ -29,6 +29,8 @@ from app.database import Base, engine, get_db
 from app.dependencies import template_context, templates
 from app.models import Assessment, AssessmentStatus, Client, MSPSettings
 from app.routers import assessments, clients, reports, settings
+from app.services.questions import SECTIONS
+from app.services.scoring import score_assessment
 
 
 _BASE = Path(__file__).resolve().parent
@@ -55,6 +57,7 @@ def _bootstrap_db() -> None:
                     primary_color="#1f3a5f",
                     report_footer_text="Confidential - Prepared for the named client only.",
                     report_font_family="Poppins",
+                    archive_after_years=5,
                 )
             )
             session.commit()
@@ -152,6 +155,81 @@ def create_app() -> FastAPI:
             now=datetime.utcnow(),
         )
         return templates.TemplateResponse("dashboard.html", ctx)
+
+    @app.get("/portfolio", response_class=HTMLResponse)
+    def portfolio_heatmap(
+        request: Request, db: Session = Depends(get_db)
+    ) -> HTMLResponse:
+        """Per-client section heatmap of the most recent assessment scores.
+
+        The grid lets a vCISO answer "where am I weakest across the book?"
+        in one view. Cells are coloured by the same score bands the rest of
+        the report uses, and clicking a cell opens that section directly.
+        """
+        clients = (
+            db.query(Client)
+            .options(selectinload(Client.assessments).selectinload(Assessment.answers))
+            .order_by(Client.name)
+            .all()
+        )
+
+        rows = []
+        for client in clients:
+            # Pick the most recent assessment that has any answers; otherwise
+            # the latest, otherwise None. This keeps brand-new clients in the
+            # grid as a single empty row instead of disappearing.
+            latest = next(
+                (a for a in client.assessments if a.answers),
+                client.assessments[0] if client.assessments else None,
+            )
+            cells = []
+            if latest is not None:
+                result = score_assessment(latest)
+                section_lookup = {s.key: s for s in result.sections}
+                for sec in SECTIONS:
+                    bucket = section_lookup.get(sec["key"])
+                    if bucket is None or bucket.possible == 0:
+                        cells.append({"key": sec["key"], "name": sec["name"], "state": "empty"})
+                        continue
+                    pct = bucket.percentage
+                    if pct >= 85:
+                        state = "good"
+                    elif pct >= 70:
+                        state = "warn"
+                    elif pct >= 50:
+                        state = "high"
+                    else:
+                        state = "critical"
+                    cells.append(
+                        {
+                            "key": sec["key"],
+                            "name": sec["name"],
+                            "state": state,
+                            "percentage": pct,
+                            "answered": bucket.answered,
+                            "total": bucket.total,
+                        }
+                    )
+            else:
+                cells = [
+                    {"key": s["key"], "name": s["name"], "state": "empty"}
+                    for s in SECTIONS
+                ]
+            rows.append(
+                {
+                    "client": client,
+                    "latest": latest,
+                    "cells": cells,
+                }
+            )
+
+        ctx = template_context(
+            request,
+            db,
+            sections=[{"key": s["key"], "name": s["name"]} for s in SECTIONS],
+            rows=rows,
+        )
+        return templates.TemplateResponse("portfolio.html", ctx)
 
     @app.get("/healthz")
     def healthz() -> dict:

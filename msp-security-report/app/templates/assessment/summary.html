@@ -15,6 +15,21 @@
     </div>
   {% endif %}
 
+  {% if incomplete_sections %}
+    <div class="alert alert-warn">
+      <strong>{{ incomplete_sections|length }} section{{ '' if incomplete_sections|length == 1 else 's' }} still incomplete.</strong>
+      Scores are computed against answered questions only, so the figures below will move as you finish them.
+      <ul class="incomplete-list">
+        {% for s in incomplete_sections %}
+          <li>
+            <a href="/assessments/{{ assessment.id }}/sections/{{ s.key }}">{{ s.name }}</a>
+            <span class="muted small">&mdash; {{ s.answered }} of {{ s.total }} answered</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
   <section class="summary-hero card">
     <div class="summary-hero-left">
       <div class="muted small">Overall security posture score</div>
@@ -35,14 +50,42 @@
     </div>
   </section>
 
-  {% if executive_findings %}
-    <section class="card">
-      <header class="card-header"><h2>Executive findings</h2></header>
+  <section class="card">
+    <header class="card-header">
+      <h2>Executive findings</h2>
+      <span class="muted small">Auto-generated bullets always shown; custom narrative optional.</span>
+    </header>
+
+    {% if assessment.executive_summary_override %}
+      <div class="exec-narrative">
+        {% for para in assessment.executive_summary_override.split('\n\n') %}
+          {% if para.strip() %}<p>{{ para }}</p>{% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if executive_findings %}
       <ul class="findings-list">
         {% for f in executive_findings %}<li>{{ f }}</li>{% endfor %}
       </ul>
-    </section>
-  {% endif %}
+    {% endif %}
+
+    <details class="exec-editor" {% if not assessment.executive_summary_override %}{% else %}open{% endif %}>
+      <summary>{% if assessment.executive_summary_override %}Edit{% else %}Add{% endif %} custom narrative</summary>
+      <form method="post" action="/assessments/{{ assessment.id }}/executive-summary" class="form-card">
+        <p class="muted small">
+          Optional. Anything you write here appears <em>above</em> the
+          auto-generated bullets in the PDF and on this page. Leave blank to
+          keep the default behaviour.
+        </p>
+        <textarea name="executive_summary" rows="6" maxlength="4000"
+                  placeholder="e.g. The 2026 review focused on three priority workstreams flagged during last year's tabletop...">{{ assessment.executive_summary_override or '' }}</textarea>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save narrative</button>
+        </div>
+      </form>
+    </details>
+  </section>
 
   <section class="card">
     <header class="card-header"><h2>Section breakdown</h2></header>

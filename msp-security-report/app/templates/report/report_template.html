@@ -353,6 +353,11 @@
         {% endif %}
       </td>
       <td class="exec-detail">
+        {% if executive_narrative %}
+          {% for para in executive_narrative %}
+            <p>{{ para }}</p>
+          {% endfor %}
+        {% endif %}
         <h4>Key findings</h4>
         {% if executive_findings %}
           <ul>
@@ -422,7 +427,14 @@
         <tbody>
           {% for q in s.questions %}
             <tr>
-              <td>{{ q.text }}</td>
+              <td>
+                {{ q.text }}
+                {% if q.notes %}
+                  <div class="muted small" style="margin-top: 3pt;">
+                    <strong>Notes:</strong> {{ q.notes }}
+                  </div>
+                {% endif %}
+              </td>
               <td>{{ q.answer_label }}</td>
               <td class="num">{{ '%.1f'|format(q.earned) }} / {{ q.possible }}</td>
             </tr>
@@ -548,7 +560,12 @@
                   <div class="muted small">{{ r.question_text }}</div>
                 </td>
                 <td>{{ r.text }}</td>
-                <td class="muted small">{{ r.rationale }}</td>
+                <td class="muted small">
+                  {{ r.rationale }}
+                  {% if r.notes %}
+                    <div style="margin-top: 3pt;"><strong>Evidence:</strong> {{ r.notes }}</div>
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           </tbody>

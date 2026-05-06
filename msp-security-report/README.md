@@ -15,11 +15,23 @@ host such as an internal VLAN or a Tailscale-only node.
 
 - Track clients and run a year-on-year assessment against each one.
 - Multi-step wizard with eight control domains and ~40 weighted questions.
+- Pre-fill a new assessment with last year's answers in one click; per-question
+  "changed since last year" indicator and "show changed only" filter on the
+  wizard.
+- Per-question free-text notes / evidence captured during the workshop and
+  surfaced in the PDF section breakdown and recommendations.
 - Optional Nessus CSV ingestion that adjusts the posture score and feeds a
   vulnerability-findings section in the report.
+- Optional operator-authored executive narrative that sits above the
+  auto-generated findings on the report (default behaviour preserved).
+- Optional per-question recommendation overrides for MSPs who want to
+  customise the report's voice without editing code.
+- Portfolio heatmap that shows every client's per-section score in one grid.
 - Branded PDF output (logo, primary colour, footer text) generated from a
   WeasyPrint-friendly HTML template.
-- Per-client report archive with re-download.
+- Per-client report archive with re-download; close / reopen lifecycle
+  controls; configurable auto-archive of old assessments.
+- Search and industry filter on the clients list.
 - Alembic migrations and a seeded `MSPSettings` row on first run.
 
 ---

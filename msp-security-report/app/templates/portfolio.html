@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block page_title %}Portfolio heatmap{% endblock %}
+
+{% block page_actions %}
+  <a href="/clients" class="btn btn-secondary">Client list</a>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <header class="card-header">
+      <h2>Section scores by client</h2>
+      <p class="muted">
+        Latest assessment per client, coloured by section score using the same
+        risk bands as the report. Click a cell to jump straight into that
+        section. Empty cells indicate sections that have not been answered yet
+        for that client.
+      </p>
+    </header>
+
+    {% if rows %}
+      <div class="heatmap-wrap">
+        <table class="heatmap">
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Year</th>
+              <th>Overall</th>
+              {% for s in sections %}
+                <th title="{{ s.name }}">{{ s.name }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td>
+                  <a href="/clients/{{ row.client.id }}"><strong>{{ row.client.name }}</strong></a>
+                  {% if row.client.industry %}
+                    <div class="muted small">{{ row.client.industry }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.latest %}{{ row.latest.year }}{% else %}<span class="muted">&mdash;</span>{% endif %}
+                </td>
+                <td>
+                  {% if row.latest and row.latest.risk_rating %}
+                    <span class="risk-pill risk-{{ row.latest.risk_rating.value|lower }}">
+                      {{ row.latest.overall_score if row.latest.overall_score is not none else '-' }}%
+                    </span>
+                  {% else %}
+                    <span class="muted">&mdash;</span>
+                  {% endif %}
+                </td>
+                {% for cell in row.cells %}
+                  <td class="heatmap-cell heatmap-{{ cell.state }}"
+                      title="{{ cell.name }}{% if cell.percentage is defined %} - {{ '%.0f'|format(cell.percentage) }}% ({{ cell.answered }} of {{ cell.total }} answered){% endif %}">
+                    {% if row.latest and cell.state != 'empty' %}
+                      <a href="/assessments/{{ row.latest.id }}/sections/{{ cell.key }}">
+                        {{ '%.0f'|format(cell.percentage) }}%
+                      </a>
+                    {% else %}
+                      <span class="muted">&mdash;</span>
+                    {% endif %}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="heatmap-legend">
+        <span><span class="legend-swatch heatmap-good"></span> &ge; 85%</span>
+        <span><span class="legend-swatch heatmap-warn"></span> 70&ndash;84%</span>
+        <span><span class="legend-swatch heatmap-high"></span> 50&ndash;69%</span>
+        <span><span class="legend-swatch heatmap-critical"></span> &lt; 50%</span>
+        <span><span class="legend-swatch heatmap-empty"></span> Not assessed</span>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h3>No clients yet</h3>
+        <p>Once you've added clients and run at least one assessment, this view will populate.</p>
+        <a href="/clients/new" class="btn btn-primary">Add a client</a>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -17,6 +17,8 @@ from app.dependencies import (
     templates,
     upload_dir,
 )
+from app.models import RecommendationOverride
+from app.services.questions import SECTIONS
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -76,6 +78,7 @@ async def save_settings(
     report_footer_text: Optional[str] = Form(None),
     report_font_family: Optional[str] = Form(None),
     report_font_custom: Optional[str] = Form(None),
+    archive_after_years: int = Form(5),
     logo: Optional[UploadFile] = File(None),
     remove_logo: Optional[str] = Form(None),
 ):
@@ -113,12 +116,18 @@ async def save_settings(
             "settings.html", ctx, status_code=400
         )
 
+    # Clamp the archive threshold to a sane range. 0 means "archive everything
+    # older than this year" (effectively a single-year view) and we cap the
+    # upper end so the form can't be used to disable archiving entirely.
+    archive_clamped = max(0, min(int(archive_after_years or 0), 100))
+
     settings.company_name = company_name
     settings.primary_color = primary_color
     settings.contact_email = (contact_email or "").strip() or None
     settings.contact_phone = (contact_phone or "").strip() or None
     settings.report_footer_text = (report_footer_text or "").strip() or None
     settings.report_font_family = chosen_font
+    settings.archive_after_years = archive_clamped
 
     # Handle logo upload.
     if logo is not None and logo.filename:
@@ -180,3 +189,77 @@ async def save_settings(
 
     db.commit()
     return RedirectResponse(url="/settings?saved=1", status_code=303)
+
+
+# ----------------------------------------------------------------------------
+# Recommendation overrides
+# ----------------------------------------------------------------------------
+
+# Hard cap on a single override to prevent obviously abusive payloads.
+_MAX_RECOMMENDATION_CHARS = 2000
+
+
+@router.get("/recommendations", response_class=HTMLResponse)
+def show_recommendation_overrides(
+    request: Request, db: Session = Depends(get_db)
+) -> HTMLResponse:
+    """List every catalog question alongside its (default | overridden) text."""
+    existing = {
+        row.question_key: row.text
+        for row in db.query(RecommendationOverride).all()
+    }
+    ctx = template_context(
+        request,
+        db,
+        sections=SECTIONS,
+        overrides=existing,
+        saved=bool(request.query_params.get("saved")),
+    )
+    return templates.TemplateResponse("settings_recommendations.html", ctx)
+
+
+@router.post("/recommendations")
+async def save_recommendation_overrides(
+    request: Request, db: Session = Depends(get_db)
+):
+    """Upsert / clear overrides in a single batch.
+
+    Empty textareas mean "use the catalog default" and any existing override
+    row for that question is deleted. Non-empty values are stored verbatim
+    (after stripping) and replace any prior override.
+    """
+    form = await request.form()
+    existing = {
+        row.question_key: row
+        for row in db.query(RecommendationOverride).all()
+    }
+    seen_keys: set[str] = set()
+
+    for section in SECTIONS:
+        for q in section["questions"]:
+            key = q["key"]
+            seen_keys.add(key)
+            raw = form.get(f"override_{key}")
+            if raw is None:
+                continue
+            text = str(raw).strip()
+            if len(text) > _MAX_RECOMMENDATION_CHARS:
+                text = text[:_MAX_RECOMMENDATION_CHARS]
+            row = existing.get(key)
+            if not text:
+                if row is not None:
+                    db.delete(row)
+                continue
+            if row is None:
+                db.add(RecommendationOverride(question_key=key, text=text))
+            else:
+                row.text = text
+
+    # Anything in the DB whose question is no longer in the catalog is also
+    # cleaned up here so the override list never accumulates dead rows.
+    for key, row in existing.items():
+        if key not in seen_keys:
+            db.delete(row)
+
+    db.commit()
+    return RedirectResponse(url="/settings/recommendations?saved=1", status_code=303)

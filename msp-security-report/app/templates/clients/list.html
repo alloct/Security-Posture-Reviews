@@ -7,8 +7,34 @@
 {% endblock %}
 
 {% block content %}
+  <form method="get" action="/clients" class="card filter-bar">
+    <label class="filter-field filter-field-grow">
+      <span>Search</span>
+      <input type="text" name="q" value="{{ active_q or '' }}"
+             placeholder="Name, contact, industry, notes..." />
+    </label>
+    <label class="filter-field">
+      <span>Industry</span>
+      <select name="industry">
+        <option value="">All industries</option>
+        {% for ind in industries %}
+          <option value="{{ ind }}" {% if ind == active_industry %}selected{% endif %}>{{ ind }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if is_filtered %}
+        <a href="/clients" class="link">Clear</a>
+      {% endif %}
+    </div>
+  </form>
+
   <div class="card">
     {% if clients %}
+      {% if is_filtered %}
+        <p class="muted small">{{ clients|length }} match{{ '' if clients|length == 1 else 'es' }} for the current filter.</p>
+      {% endif %}
       <table class="data-table">
         <thead>
           <tr>
@@ -49,9 +75,15 @@
       </table>
     {% else %}
       <div class="empty-state">
-        <h3>No clients yet</h3>
-        <p>Add your first client to begin tracking annual security posture.</p>
-        <a href="/clients/new" class="btn btn-primary">Add Client</a>
+        {% if is_filtered %}
+          <h3>No clients match the current filter</h3>
+          <p>Try a different search term or clear the filter.</p>
+          <a href="/clients" class="btn btn-secondary">Clear filter</a>
+        {% else %}
+          <h3>No clients yet</h3>
+          <p>Add your first client to begin tracking annual security posture.</p>
+          <a href="/clients/new" class="btn btn-primary">Add Client</a>
+        {% endif %}
       </div>
     {% endif %}
   </div>

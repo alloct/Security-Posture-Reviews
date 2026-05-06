@@ -42,6 +42,7 @@ from app.services.questions import SECTIONS, section_by_key
 from app.services.scoring import (
     generate_executive_findings,
     generate_recommendations,
+    load_recommendation_overrides,
     score_assessment,
 )
 
@@ -109,9 +110,84 @@ def _existing_answers_map(assessment: Assessment, section_key: str) -> dict[str,
     }
 
 
+def _existing_notes_map(assessment: Assessment, section_key: str) -> dict[str, str]:
+    return {
+        a.question_key: (a.notes or "")
+        for a in assessment.answers
+        if a.section == section_key
+    }
+
+
+def _prior_assessment_answers_for_section(
+    db: Session, assessment: Assessment, section_key: str
+) -> dict[str, dict]:
+    """Return ``{question_key: {value, label, year}}`` for the most recent
+    prior-year assessment of the same client. Empty dict if none exists.
+
+    Used by the wizard to highlight which questions have changed since the
+    last review without leaking the actual prior answer value into the form.
+    """
+    prior = _latest_prior_assessment(
+        db, assessment.client_id, before_year=assessment.year
+    )
+    if prior is None:
+        return {}
+    return {
+        ans.question_key: {
+            "value": ans.answer_value,
+            "label": ans.answer_label,
+            "year": prior.year,
+        }
+        for ans in prior.answers
+        if ans.section == section_key
+    }
+
+
 # ----------------------------------------------------------------------------
 # Create / start
 # ----------------------------------------------------------------------------
+
+def _latest_prior_assessment(
+    db: Session, client_id: int, before_year: Optional[int] = None
+) -> Optional[Assessment]:
+    """Return the most recent assessment for ``client_id`` strictly older than
+    ``before_year`` (or simply the most recent if ``before_year`` is None)."""
+    q = (
+        db.query(Assessment)
+        .filter(Assessment.client_id == client_id)
+        .order_by(Assessment.year.desc())
+    )
+    if before_year is not None:
+        q = q.filter(Assessment.year < before_year)
+    return q.first()
+
+
+def _copy_answers_from(prior: Assessment, new: Assessment) -> int:
+    """Clone every answer from ``prior`` whose ``question_key`` still exists
+    in the live catalog onto ``new``. Returns the number of answers copied.
+
+    Notes are intentionally NOT copied so the operator captures fresh evidence
+    for the new year rather than inheriting last year's commentary verbatim.
+    """
+    catalog = {q["key"]: q for sec in SECTIONS for q in sec["questions"]}
+    copied = 0
+    for ans in prior.answers:
+        question = catalog.get(ans.question_key)
+        if question is None:
+            continue
+        new.answers.append(
+            AssessmentAnswer(
+                section=ans.section,
+                question_key=ans.question_key,
+                question_text=question["text"],
+                answer_value=ans.answer_value,
+                answer_label=ans.answer_label,
+                weight=question["weight"],
+            )
+        )
+        copied += 1
+    return copied
+
 
 @router.get("/new", response_class=HTMLResponse)
 def start_assessment_form(
@@ -121,12 +197,16 @@ def start_assessment_form(
 ) -> HTMLResponse:
     clients = db.query(Client).order_by(Client.name).all()
     selected = db.get(Client, client_id) if client_id else None
+    prior_for_selected = (
+        _latest_prior_assessment(db, selected.id) if selected else None
+    )
     ctx = template_context(
         request,
         db,
         clients=clients,
         selected_client=selected,
         default_year=datetime.utcnow().year,
+        prior_for_selected=prior_for_selected,
         errors=[],
     )
     return templates.TemplateResponse("assessment/start.html", ctx)
@@ -138,6 +218,7 @@ def start_assessment(
     db: Session = Depends(get_db),
     client_id: int = Form(...),
     year: int = Form(...),
+    copy_from_previous: Optional[str] = Form(None),
 ):
     client = db.get(Client, client_id)
     if client is None:
@@ -160,6 +241,15 @@ def start_assessment(
         status=AssessmentStatus.in_progress,
     )
     db.add(a)
+
+    # Optional pre-fill from the most recent prior assessment for this client.
+    # We only copy when the operator opted in AND a prior assessment from a
+    # strictly earlier year exists.
+    if copy_from_previous == "1":
+        prior = _latest_prior_assessment(db, client.id, before_year=year)
+        if prior is not None:
+            _copy_answers_from(prior, a)
+
     db.commit()
     db.refresh(a)
     return RedirectResponse(
@@ -204,8 +294,36 @@ def show_section(
 
     idx = _section_index(section_key)
     answers_map = _existing_answers_map(a, section_key)
+    notes_map = _existing_notes_map(a, section_key)
+    prior_map = _prior_assessment_answers_for_section(db, a, section_key)
     prev_key = SECTIONS[idx - 1]["key"] if idx > 0 else None
     next_key = SECTIONS[idx + 1]["key"] if idx < len(SECTIONS) - 1 else None
+
+    # Decorate each question with prior-year comparison metadata so the
+    # template can render a "Updated" badge and the "show changed only"
+    # toggle without doing logic in Jinja.
+    decorated_questions = []
+    for q in section["questions"]:
+        prior = prior_map.get(q["key"]) if prior_map else None
+        current_value = answers_map.get(q["key"])
+        if prior is None:
+            change_state = "no_prior"
+        elif current_value is None:
+            change_state = "needs_review"  # had a prior answer, none yet here
+        elif current_value != prior["value"]:
+            change_state = "changed"
+        else:
+            change_state = "unchanged"
+        decorated_questions.append(
+            {
+                **q,
+                "prior": prior,
+                "change_state": change_state,
+            }
+        )
+
+    has_prior = bool(prior_map)
+    prior_year = next(iter(prior_map.values()))["year"] if prior_map else None
 
     ctx = template_context(
         request,
@@ -217,6 +335,10 @@ def show_section(
         section_total=len(SECTIONS),
         all_sections=SECTIONS,
         answers=answers_map,
+        notes=notes_map,
+        decorated_questions=decorated_questions,
+        has_prior=has_prior,
+        prior_year=prior_year,
         prev_section_key=prev_key,
         next_section_key=next_key,
     )
@@ -238,44 +360,57 @@ async def save_section(
     form = await request.form()
     direction = (form.get("direction") or "next").strip()
 
+    # Build a lookup of existing answers keyed by question_key once, instead
+    # of scanning the relationship for every question (matters mostly for
+    # forms that update many answers at once).
+    existing_by_key = {ans.question_key: ans for ans in a.answers}
+
     # Upsert each answer in this section.
     for question in section["questions"]:
         raw = form.get(f"q_{question['key']}")
-        if raw is None:
-            continue
-        value = str(raw)
-        # Resolve label from option list.
-        label = next(
-            (opt["label"] for opt in question["options"] if opt["value"] == value),
-            value,
-        )
+        # The notes field is independent: an operator can leave the radio
+        # untouched but still update the notes for a previously answered row.
+        notes_raw = form.get(f"notes_{question['key']}")
+        notes_clean: Optional[str] = None
+        if notes_raw is not None:
+            stripped = str(notes_raw).strip()
+            notes_clean = stripped or None
 
-        existing = next(
-            (
-                ans
-                for ans in a.answers
-                if ans.question_key == question["key"]
-            ),
-            None,
-        )
-        if existing is None:
-            db.add(
-                AssessmentAnswer(
-                    assessment_id=a.id,
-                    section=section_key,
-                    question_key=question["key"],
-                    question_text=question["text"],
-                    answer_value=value,
-                    answer_label=label,
-                    weight=question["weight"],
-                )
+        if raw is None and notes_raw is None:
+            continue
+
+        existing = existing_by_key.get(question["key"])
+
+        if raw is not None:
+            value = str(raw)
+            label = next(
+                (opt["label"] for opt in question["options"] if opt["value"] == value),
+                value,
             )
-        else:
-            existing.answer_value = value
-            existing.answer_label = label
-            existing.weight = question["weight"]
-            existing.section = section_key
-            existing.question_text = question["text"]
+            if existing is None:
+                db.add(
+                    AssessmentAnswer(
+                        assessment_id=a.id,
+                        section=section_key,
+                        question_key=question["key"],
+                        question_text=question["text"],
+                        answer_value=value,
+                        answer_label=label,
+                        weight=question["weight"],
+                        notes=notes_clean,
+                    )
+                )
+            else:
+                existing.answer_value = value
+                existing.answer_label = label
+                existing.weight = question["weight"]
+                existing.section = section_key
+                existing.question_text = question["text"]
+                if notes_raw is not None:
+                    existing.notes = notes_clean
+        elif existing is not None and notes_raw is not None:
+            # Notes-only update on an already-answered question.
+            existing.notes = notes_clean
 
     db.commit()
 
@@ -306,7 +441,8 @@ def assessment_summary(
 ):
     a = _get_assessment_or_404(db, assessment_id)
     result = score_assessment(a)
-    recommendations = generate_recommendations(result)
+    overrides = load_recommendation_overrides(db)
+    recommendations = generate_recommendations(result, overrides=overrides)
     findings = generate_executive_findings(result, recommendations)
 
     # Persist latest score on the record so the dashboard reflects it.
@@ -322,6 +458,20 @@ def assessment_summary(
     # and trigger the download.
     just_generated_id = generated or 0
 
+    # Section-level completion summary. ``incomplete_sections`` drives the
+    # checklist banner at the top of the page so an operator can jump straight
+    # to whatever's still unanswered without scrolling.
+    incomplete_sections = [
+        {
+            "key": s.key,
+            "name": s.name,
+            "answered": s.answered,
+            "total": s.total,
+        }
+        for s in result.sections
+        if s.total > 0 and s.answered < s.total
+    ]
+
     ctx = template_context(
         request,
         db,
@@ -332,6 +482,7 @@ def assessment_summary(
         executive_findings=findings,
         total_questions=total_questions,
         answered_questions=answered,
+        incomplete_sections=incomplete_sections,
         report_just_generated=just_generated_id,
     )
     return templates.TemplateResponse("assessment/summary.html", ctx)
@@ -384,7 +535,8 @@ async def upload_nessus(
     except NessusParseError as exc:
         # Re-render the summary page with an error.
         result = score_assessment(a)
-        recommendations = generate_recommendations(result)
+        overrides = load_recommendation_overrides(db)
+        recommendations = generate_recommendations(result, overrides=overrides)
         findings = generate_executive_findings(result, recommendations)
         ctx = template_context(
             request,
@@ -447,6 +599,38 @@ def clear_nessus(assessment_id: int, db: Session = Depends(get_db)):
     result = score_assessment(a)
     a.overall_score = round(result.percentage, 1)
     a.risk_rating = result.risk_rating
+    db.commit()
+    return RedirectResponse(
+        url=f"/assessments/{a.id}/summary", status_code=303
+    )
+
+
+# ----------------------------------------------------------------------------
+# Optional executive-summary narrative
+# ----------------------------------------------------------------------------
+
+# Hard cap on the operator-authored narrative. Anything genuinely book-length
+# belongs elsewhere; this is the cover-letter slot above the auto-bullets.
+_MAX_EXEC_SUMMARY_CHARS = 4000
+
+
+@router.post("/{assessment_id}/executive-summary")
+def save_executive_summary(
+    assessment_id: int,
+    db: Session = Depends(get_db),
+    executive_summary: Optional[str] = Form(None),
+):
+    a = _get_assessment_or_404(db, assessment_id)
+    text = (executive_summary or "").strip()
+    if len(text) > _MAX_EXEC_SUMMARY_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Executive summary too long "
+                f"(limit {_MAX_EXEC_SUMMARY_CHARS} characters)."
+            ),
+        )
+    a.executive_summary_override = text or None
     db.commit()
     return RedirectResponse(
         url=f"/assessments/{a.id}/summary", status_code=303

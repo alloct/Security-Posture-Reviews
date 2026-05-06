@@ -30,7 +30,19 @@
         <h2>Assessment history</h2>
         <a href="/assessments/new?client_id={{ client.id }}" class="link">Start new</a>
       </header>
-      {% if client.assessments %}
+      {% if archived_count and not show_all %}
+        <p class="muted small">
+          {{ archived_count }} older assessment{{ '' if archived_count == 1 else 's' }}
+          (before {{ cutoff_year }}) hidden &middot;
+          <a href="/clients/{{ client.id }}?show_all=1" class="link">Show all</a>
+        </p>
+      {% elif show_all and archived_count %}
+        <p class="muted small">
+          Showing all assessments &middot;
+          <a href="/clients/{{ client.id }}" class="link">Hide archived</a>
+        </p>
+      {% endif %}
+      {% if visible_assessments %}
         <table class="data-table">
           <thead>
             <tr>
@@ -43,7 +55,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for a in client.assessments %}
+            {% for a in visible_assessments %}
               <tr>
                 <td><strong>{{ a.year }}</strong></td>
                 <td><span class="badge badge-{{ a.status.value }}">{{ a.status.value.replace('_', ' ') }}</span></td>
@@ -86,6 +98,13 @@
             {% endfor %}
           </tbody>
         </table>
+      {% elif client.assessments %}
+        <div class="empty-state">
+          <h3>All assessments archived</h3>
+          <p>The most recent assessment for this client is older than the auto-archive cutoff.</p>
+          <a href="/clients/{{ client.id }}?show_all=1" class="btn btn-secondary">Show archived</a>
+          <a href="/assessments/new?client_id={{ client.id }}" class="btn btn-primary">Start new</a>
+        </div>
       {% else %}
         <div class="empty-state">
           <h3>No assessments yet</h3>

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block page_title %}Recommendation overrides{% endblock %}
+
+{% block page_actions %}
+  <a href="/settings" class="btn btn-secondary">Back to settings</a>
+{% endblock %}
+
+{% block content %}
+  {% if saved %}
+    <div class="alert alert-success">Recommendation overrides saved.</div>
+  {% endif %}
+
+  <div class="card">
+    <header class="card-header">
+      <h2>Custom recommendation language</h2>
+      <p class="muted">
+        Each control question ships with a catalog recommendation that the
+        report uses by default. Leave a textarea blank to keep the default.
+        Add text to override the default for that question across every
+        future report &mdash; existing reports already on disk are not
+        re-rendered.
+      </p>
+    </header>
+
+    <form method="post" action="/settings/recommendations">
+      {% for section in sections %}
+        <h3 class="section-sub">{{ section.name }}</h3>
+        <div class="overrides-list">
+          {% for q in section.questions %}
+            {% set has_override = overrides.get(q.key) %}
+            <div class="override-row">
+              <div class="override-question">
+                <strong>{{ q.text }}</strong>
+                <span class="question-weight" title="Question weight">weight {{ q.weight }}</span>
+                {% if has_override %}
+                  <span class="badge badge-warn small">Overridden</span>
+                {% endif %}
+              </div>
+              <div class="override-default muted small">
+                <strong>Catalog default:</strong>
+                {{ q.recommendation or '(no default recommendation - this question never emits one)' }}
+              </div>
+              <textarea name="override_{{ q.key }}" rows="3" maxlength="2000"
+                        placeholder="Leave blank to use the catalog default.">{{ overrides.get(q.key) or '' }}</textarea>
+            </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save overrides</button>
+      </div>
+    </form>
+  </div>
+{% endblock %}

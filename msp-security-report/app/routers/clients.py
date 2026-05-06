@@ -1,13 +1,15 @@
 """Client CRUD routes."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
-from app.dependencies import get_db, template_context, templates
+from app.dependencies import get_db, get_settings, template_context, templates
 from app.models import Assessment, Client
 from app.routers.assessments import _delete_assessment_files
 
@@ -16,9 +18,53 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 
 
 @router.get("", response_class=HTMLResponse)
-def list_clients(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    clients = db.query(Client).order_by(Client.name).all()
-    ctx = template_context(request, db, clients=clients)
+def list_clients(
+    request: Request,
+    db: Session = Depends(get_db),
+    q: Optional[str] = None,
+    industry: Optional[str] = None,
+) -> HTMLResponse:
+    query = db.query(Client)
+
+    q_clean = (q or "").strip()
+    if q_clean:
+        like = f"%{q_clean}%"
+        query = query.filter(
+            or_(
+                Client.name.ilike(like),
+                Client.primary_contact_name.ilike(like),
+                Client.primary_contact_email.ilike(like),
+                Client.industry.ilike(like),
+                Client.notes.ilike(like),
+            )
+        )
+
+    industry_clean = (industry or "").strip()
+    if industry_clean:
+        query = query.filter(Client.industry == industry_clean)
+
+    clients = query.order_by(Client.name).all()
+
+    # Distinct, non-null industries for the filter dropdown.
+    industries = sorted(
+        {
+            row[0]
+            for row in db.query(Client.industry)
+            .filter(Client.industry.isnot(None))
+            .filter(Client.industry != "")
+            .all()
+        }
+    )
+
+    ctx = template_context(
+        request,
+        db,
+        clients=clients,
+        industries=industries,
+        active_q=q_clean,
+        active_industry=industry_clean,
+        is_filtered=bool(q_clean or industry_clean),
+    )
     return templates.TemplateResponse("clients/list.html", ctx)
 
 
@@ -78,7 +124,10 @@ def create_client(
 
 @router.get("/{client_id}", response_class=HTMLResponse)
 def client_detail(
-    client_id: int, request: Request, db: Session = Depends(get_db)
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    show_all: int = 0,
 ) -> HTMLResponse:
     # Eagerly load assessments and their reports so the page never relies on
     # lazy-load timing and always reflects the latest state of the database
@@ -93,7 +142,30 @@ def client_detail(
     )
     if client is None:
         raise HTTPException(status_code=404, detail="Client not found")
-    ctx = template_context(request, db, client=client)
+
+    # Apply the auto-archive cutoff. Assessments whose ``year`` is older than
+    # the cutoff are hidden by default but can be revealed with ?show_all=1.
+    settings = get_settings(db)
+    cutoff_years = settings.archive_after_years
+    if cutoff_years is None:
+        cutoff_years = 5
+    cutoff_year = datetime.utcnow().year - cutoff_years
+    if show_all:
+        visible = list(client.assessments)
+        archived_count = 0
+    else:
+        visible = [a for a in client.assessments if a.year >= cutoff_year]
+        archived_count = len(client.assessments) - len(visible)
+
+    ctx = template_context(
+        request,
+        db,
+        client=client,
+        visible_assessments=visible,
+        archived_count=archived_count,
+        show_all=bool(show_all),
+        cutoff_year=cutoff_year,
+    )
     return templates.TemplateResponse("clients/detail.html", ctx)
 
 

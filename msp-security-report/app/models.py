@@ -53,6 +53,12 @@ class MSPSettings(Base):
     report_font_family: Mapped[str] = mapped_column(
         String(120), nullable=False, default="Poppins"
     )
+    # Assessments older than this many years are auto-hidden from the client
+    # detail page (still in the database, still scorable, just collapsed
+    # behind a "show all" toggle so long-term clients stay readable).
+    archive_after_years: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -105,6 +111,10 @@ class Assessment(Base):
     )
     nessus_csv_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     nessus_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Optional operator-authored narrative shown above the auto-generated
+    # executive findings on the report. The auto findings are always rendered;
+    # this just lets the operator add a personalised opener.
+    executive_summary_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
@@ -145,8 +155,31 @@ class AssessmentAnswer(Base):
     # Display label that was shown to the user (e.g. "Yes", "Partial", "No").
     answer_label: Mapped[str] = mapped_column(String(120), nullable=False)
     weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Free-text evidence / context captured while answering. Surfaced under
+    # the answer in the PDF section breakdown and appended to recommendation
+    # rationale when the answer scored less than full marks.
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     assessment: Mapped[Assessment] = relationship("Assessment", back_populates="answers")
+
+
+class RecommendationOverride(Base):
+    """Optional MSP-authored override of a question's catalog recommendation.
+
+    The catalog default lives in ``app/services/questions.py`` and remains in
+    effect when no row exists here. When a row IS present for a given
+    ``question_key``, the scoring engine emits the override text instead, so
+    operators can refine the language to match their voice without editing
+    code.
+    """
+
+    __tablename__ = "recommendation_overrides"
+
+    question_key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class GeneratedReport(Base):

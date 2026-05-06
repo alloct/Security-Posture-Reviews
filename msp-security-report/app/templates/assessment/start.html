@@ -36,6 +36,26 @@
           <span>Assessment year <em>required</em></span>
           <input type="number" name="year" min="2000" max="2100" value="{{ default_year }}" required />
         </label>
+
+        <div class="form-field form-field-wide">
+          <label class="checkbox">
+            <input type="checkbox" name="copy_from_previous" value="1"
+                   {% if prior_for_selected %}checked{% endif %} />
+            <span>
+              Pre-fill answers from this client's most recent prior assessment
+              {% if prior_for_selected %}
+                <span class="muted small">(found: {{ prior_for_selected.year }})</span>
+              {% else %}
+                <span class="muted small">(none on file yet for the selected client)</span>
+              {% endif %}
+            </span>
+          </label>
+          <small class="muted">
+            Only answers whose question still exists in the catalog are copied.
+            Per-question notes are intentionally not copied so you can capture
+            fresh evidence this year.
+          </small>
+        </div>
       </div>
       <p class="muted small">If an assessment for this client and year already exists, you will be taken back to it to continue.</p>
       <div class="form-actions">

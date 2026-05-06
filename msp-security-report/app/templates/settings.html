@@ -46,6 +46,18 @@
         <input type="text" name="report_footer_text" value="{{ settings.report_footer_text or '' }}" maxlength="512" />
       </label>
 
+      <label class="form-field">
+        <span>Auto-archive assessments older than (years)</span>
+        <input type="number" name="archive_after_years"
+               min="0" max="100" step="1"
+               value="{{ settings.archive_after_years if settings.archive_after_years is not none else 5 }}" />
+        <small class="muted">
+          Assessments older than this are hidden from the client detail page
+          by default. Use 0 to show only this year's assessments by default;
+          increase to retain a longer rolling window. Nothing is ever deleted.
+        </small>
+      </label>
+
       {% set current_font = settings.report_font_family or 'Poppins' %}
       {% set in_presets = current_font in font_presets %}
       <label class="form-field">
@@ -95,4 +107,16 @@
       <button type="submit" class="btn btn-primary">Save settings</button>
     </div>
   </form>
+
+  <div class="card">
+    <header class="card-header">
+      <h2>Recommendation language</h2>
+      <p class="muted">
+        Override the default catalog recommendations on a per-question basis
+        without editing code. The catalog defaults remain in place for any
+        question without an override.
+      </p>
+    </header>
+    <a href="/settings/recommendations" class="btn btn-secondary">Manage recommendation overrides</a>
+  </div>
 {% endblock %}

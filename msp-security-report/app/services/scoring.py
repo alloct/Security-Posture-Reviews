@@ -20,9 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from sqlalchemy.orm import Session
+
 from app.models import (
     Assessment,
     AssessmentAnswer,
+    RecommendationOverride,
     RiskRating,
 )
 from app.services.questions import (
@@ -32,6 +35,16 @@ from app.services.questions import (
     question_lookup,
     section_for_question,
 )
+
+
+def load_recommendation_overrides(db: Session) -> Dict[str, str]:
+    """Return ``{question_key: override_text}`` for any catalog recommendations
+    the MSP has customised. Empty dict if none have been authored.
+    """
+    return {
+        row.question_key: row.text
+        for row in db.query(RecommendationOverride).all()
+    }
 
 
 # --- Score band thresholds ----------------------------------------------------
@@ -57,6 +70,7 @@ class QuestionResult:
     possible: int
     section_key: str
     section_name: str
+    notes: Optional[str] = None
 
     @property
     def percentage(self) -> float:
@@ -189,6 +203,7 @@ def score_assessment(assessment: Assessment) -> ScoringResult:
                 possible=possible,
                 section_key=section["key"],
                 section_name=section["name"],
+                notes=ans.notes,
             )
         )
 
@@ -225,6 +240,7 @@ class Recommendation:
     answer_label: str
     text: str  # the recommendation body
     rationale: str
+    notes: Optional[str] = None  # operator-captured evidence, surfaced in PDF
 
 
 def _priority_for(question: Question, factor: float) -> str:
@@ -247,9 +263,19 @@ def _priority_for(question: Question, factor: float) -> str:
 _PRIORITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
 
-def generate_recommendations(result: ScoringResult) -> List[Recommendation]:
-    """Generate prioritised remediation recommendations from a ScoringResult."""
+def generate_recommendations(
+    result: ScoringResult,
+    overrides: Optional[Dict[str, str]] = None,
+) -> List[Recommendation]:
+    """Generate prioritised remediation recommendations from a ScoringResult.
+
+    ``overrides`` is an optional ``{question_key: text}`` mapping (typically
+    loaded with :func:`load_recommendation_overrides`). When supplied, the
+    override text replaces the catalog default for that question. The catalog
+    default is otherwise used unchanged.
+    """
     catalog = question_lookup()
+    overrides = overrides or {}
     recs: List[Recommendation] = []
 
     for section in result.sections:
@@ -261,7 +287,8 @@ def generate_recommendations(result: ScoringResult) -> List[Recommendation]:
             # Only emit a recommendation for failed or partial answers.
             if factor >= 1.0:
                 continue
-            rec_text = question_def.get("recommendation", "").strip()
+            override_text = (overrides.get(q.key) or "").strip()
+            rec_text = override_text or question_def.get("recommendation", "").strip()
             if not rec_text:
                 continue
             priority = _priority_for(question_def, factor)
@@ -277,6 +304,7 @@ def generate_recommendations(result: ScoringResult) -> List[Recommendation]:
                     answer_label=q.answer_label,
                     text=rec_text,
                     rationale=rationale,
+                    notes=q.notes or None,
                 )
             )
 

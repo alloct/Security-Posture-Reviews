@@ -17,6 +17,7 @@ from app.services.scoring import (
     ScoringResult,
     generate_executive_findings,
     generate_recommendations,
+    load_recommendation_overrides,
     score_assessment,
 )
 
@@ -127,16 +128,29 @@ def _build_jinja_env() -> Environment:
 
 
 def render_report_html(
-    assessment: Assessment, client: Client, settings: MSPSettings
+    db: Session,
+    assessment: Assessment,
+    client: Client,
+    settings: MSPSettings,
 ) -> tuple[str, ScoringResult]:
     """Render the report template to an HTML string. Returns (html, result)."""
     result = score_assessment(assessment)
-    recommendations = generate_recommendations(result)
+    overrides = load_recommendation_overrides(db)
+    recommendations = generate_recommendations(result, overrides=overrides)
     findings = generate_executive_findings(result, recommendations)
 
     env = _build_jinja_env()
     template = env.get_template("report/report_template.html")
     font_family = (settings.report_font_family or "Poppins").strip()
+    # Split the optional operator-authored narrative into paragraphs so the
+    # PDF can render them as <p> blocks rather than one giant pre-wrap chunk.
+    narrative_paragraphs: list[str] = []
+    if assessment.executive_summary_override:
+        narrative_paragraphs = [
+            p.strip()
+            for p in assessment.executive_summary_override.split("\n\n")
+            if p.strip()
+        ]
     html = template.render(
         assessment=assessment,
         client=client,
@@ -144,6 +158,7 @@ def render_report_html(
         result=result,
         recommendations=recommendations,
         executive_findings=findings,
+        executive_narrative=narrative_paragraphs,
         nessus_summary=assessment.nessus_summary,
         logo_url=_logo_url(settings),
         palette=_risk_palette(settings.primary_color),
@@ -166,7 +181,7 @@ def generate_report_pdf(
         # Should never happen because main.py seeds defaults, but be safe.
         settings = MSPSettings(company_name="Your MSP", primary_color="#1f3a5f")
 
-    html_str, result = render_report_html(assessment, client, settings)
+    html_str, result = render_report_html(db, assessment, client, settings)
 
     # Persist the latest score and rating on the assessment record.
     assessment.overall_score = round(result.percentage, 1)
